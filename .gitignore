@@ -1,0 +1,43 @@
+# Git 只记录源代码和可共享的配置，不记录个人密钥。
+# 下面的规则也匹配子目录内同名的文件；最后一条 ! 表示允许提交示例。
+.env
+.env.*
+!.env.example
+
+# 虚拟环境相当于本项目独立的依赖目录，可以通过 uv.lock 重新安装。
+.venv/
+venv/
+
+# Python 运行、测试和静态检查自动产生的缓存，无需人工维护。
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# 打包结果可以重新生成；src 中的源代码仍然会被跟踪。
+dist/
+build/
+*.egg-info/
+
+# 编辑器的个人设置、日志及本地工作目录不属于共享工程。
+.idea/
+.vscode/
+*.log
+.worktrees/
+
+# 未来模块的运行数据可能包含上传文档和聊天内容，不能进入版本库。
+# data/fixtures 和 data/evals 没有被忽略，便于提交脱敏的测试材料。
+data/uploads/
+data/runtime/
+data/milvus/
+data/postgres/
+data/checkpoints/
+*.db
+*.db-shm
+*.db-wal
+
+# 后续 Vue 项目的依赖通过包管理器安装，不提交 node_modules。
+node_modules/
