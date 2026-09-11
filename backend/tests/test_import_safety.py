@@ -9,13 +9,13 @@ import subprocess
 import sys
 from pathlib import Path
 
+"""导入只能定义类和函数，不能读配置创建实例、联网、提问或打印。
+
+下面给新进程放入一个故意无效的配置值：如果模块在顶层创建 Settings，
+导入就会失败。网络和 input 被替换为立即报错的函数，避免测试真的联网。
+"""
 
 def test_import_does_not_read_configuration_connect_or_prompt(tmp_path: Path) -> None:
-    """导入只能定义类和函数，不能读配置创建实例、联网、提问或打印。
-
-    下面给新进程放入一个故意无效的配置值：如果模块在顶层创建 Settings，
-    导入就会失败。网络和 input 被替换为立即报错的函数，避免测试真的联网。
-    """
     environment = os.environ.copy()
     environment["TRAVELMIND_ENVIRONMENT"] = "invalid-on-purpose"
     # 排除个人 PYTHONPATH，确保测试使用安装好的正式包，而非碰巧找到根目录。
@@ -36,13 +36,30 @@ def reject_input(*args, **kwargs):
 
 sys.addaudithook(reject_network)
 builtins.input = reject_input
-import travelmind
-import travelmind.settings
-import travelmind.domain.budget
-import travelmind.schemas
-import travelmind.api.v1.budget
-import travelmind.persistence.database
-import travelmind.main
+import app
+import app.config
+import app.services.budget_service
+import app.schemas.budget
+import app.api.budget
+import app.database
+import app.models.trip
+import app.services.trip_service
+import scripts.demo_trip
+import app.schemas.trip
+import app.api.trips
+import app.main
+import app.models
+import app.schemas.common
+import scripts.check_db
+import app.schemas.requirement
+import app.services.requirement_prompt
+import app.services.requirement_service
+import app.llm.client
+import scripts.demo_requirement
+import app.schemas.requirement_update
+import app.schemas.requirement_chat
+import app.services.requirement_merge
+import app.api.requirements
 """
     result = subprocess.run(
         [sys.executable, "-c", program],

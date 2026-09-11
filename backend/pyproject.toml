@@ -6,40 +6,45 @@ version = "0.1.0"
 description = "TravelMindAI engineering baseline"
 # 当前只验收 Python 3.11，暂不承诺其他 Python 次版本也已经通过测试。
 requires-python = ">=3.11,<3.12"
-# M1-A 增加 FastAPI（HTTP接口）和 Uvicorn（运行服务器），不连接大模型。
+# FastAPI/Uvicorn提供HTTP接口，LangChain的ChatOpenAI统一模型调用写法。
 # 这里写允许的版本范围，uv.lock 则记录实际选中的精确版本和下载哈希。
 dependencies = [
     "pydantic-settings>=2.10,<3",
     "pydantic>=2.10,<3", # 代码直接使用 Pydantic，显式声明而非仅靠间接依赖。
     "fastapi>=0.136,<1",
     "uvicorn>=0.41,<1",
-    "sqlalchemy>=2.0,<2.1", # 管理数据库连接，下一小步再用它定义 ORM 数据表。
+    "sqlalchemy>=2.0,<2.1", # 管理连接，并把 Python ORM 类映射成数据库表。
     "psycopg[binary]>=3.2,<4", # PostgreSQL 驱动；binary 版不需要本机编译 C 扩展。
+    "alembic>=1.16,<2", # 记录数据库表结构的版本，显式执行建表和回滚。
+    "httpx>=0.28,<1", # 管理底层连接的生命周期，也供离线测试替换网络。
+    "langchain-openai>=1.6.2,<2", # 提供ChatOpenAI，通过base_url连接DeepSeek兼容接口。
+    "openai>=2,<3", # LangChain底层SDK；代码直接使用其超时、连接和状态异常类型。
 ]
 
 # 开发工具只用于开发/测试，未来部署时可以用 uv sync --no-dev 排除。
 [dependency-groups]
 dev = [
-    "httpx>=0.28,<1", # FastAPI TestClient 用它发送进程内测试请求。
     "pytest>=8,<10", # 自动运行测试，类似 JUnit。
     "ruff>=0.12,<1", # 检查代码风格、未使用的 import，并统一格式。
     "mypy>=1.17,<2", # 静态检查类型提示，不负责真正运行代码。
 ]
 
-# 构建后端负责把 src/travelmind 安装为可 import 的 Python 包。
+# 构建后端负责把 app 安装为可 import 的 Python 包。
 # uv 会为构建工具准备隔离环境，不需要把它装进全局 Python。
 [build-system]
 requires = ["hatchling>=1.27,<2"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-# PyPI 项目名可以含连字符，Python import 的包名则是 travelmind。
-packages = ["src/travelmind"]
+# PyPI 项目名可以含连字符，Python import 的包名则是 app。
+packages = ["app", "scripts"]
 
 [tool.pytest.ini_options]
 # 只收集正式工程的测试，避免运行根目录中会调用远程模型的实验脚本。
 testpaths = ["tests"]
 addopts = "-ra --import-mode=importlib"
+# 集成测试仅在显式提供测试数据库地址时运行，普通测试不依赖 Docker。
+markers = ["postgres: requires explicit TRAVELMIND_TEST_DATABASE_URL and PostgreSQL"]
 
 [tool.ruff]
 target-version = "py311"
@@ -55,5 +60,12 @@ python_version = "3.11"
 # 不开启它时，程序虽能运行，_env_file 等参数仍可能被误报为类型错误。
 plugins = ["pydantic.mypy"]
 # 先对自己维护的核心包严格检查，测试通过 pytest 运行验证。
-files = ["src/travelmind"]
+files = ["app"]
 strict = true
+
+# Alembic 1.16 起支持 TOML 配置，统一使用 UTF-8，避免 Windows INI 的本地编码问题。
+# 数据库密码仍由 env.py 从显式指定的 .env 读取，不放在这个可提交文件里。
+[tool.alembic]
+# %(here)s 是 pyproject.toml 所在目录，迁移目录相对于这里定位。
+script_location = "%(here)s/migrations"
+output_encoding = "utf-8"

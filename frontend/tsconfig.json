@@ -1,0 +1,16 @@
+{
+  "compilerOptions": {
+    // 只在本工程检查TypeScript；最终JavaScript和CSS由Vite生成。
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true, // 不重复检查组件库发布的声明文件，仍检查自己的代码。
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "types": ["vite/client"]
+  },
+  "include": ["src/**/*.ts", "src/**/*.vue", "vite.config.ts"]
+}
