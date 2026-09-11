@@ -67,7 +67,9 @@ def test_migration_round_trip_matches_models(migrated_database: tuple[Connection
     from app.models.trip import Base
 
     connection, config = migrated_database
-    expected = {"sessions", "travel_requests", "itineraries", "alembic_version"}
+    expected = {
+        "sessions", "travel_requests", "itineraries", "requirement_turns", "alembic_version"
+    }
     assert set(inspect(connection).get_table_names()) == expected
     differences = compare_metadata(MigrationContext.configure(connection), Base.metadata)
     assert differences == []
@@ -79,6 +81,28 @@ def test_migration_round_trip_matches_models(migrated_database: tuple[Connection
     connection.commit()
     command.upgrade(config, "head")
     assert set(inspect(connection).get_table_names()) == expected
+
+
+"""从M1升级新增对话表时，已有会话数据仍可读取；回滚也只在临时schema执行。"""
+
+def test_chat_migration_preserves_existing_session(
+    migrated_database: tuple[Connection, Config],
+) -> None:
+    from app.models.trip import TravelSession
+
+    connection, config = migrated_database
+    connection.commit()
+    command.downgrade(config, "0001_business_tables")
+    with Session(connection) as unit:
+        trip = TravelSession(title="升级前已有的会话")
+        unit.add(trip)
+        unit.commit()
+        session_id = trip.id
+    connection.commit()
+    command.upgrade(config, "head")
+    with Session(connection) as reader:
+        assert reader.get(TravelSession, session_id).title == "升级前已有的会话"
+    assert "requirement_turns" in inspect(connection).get_table_names()
 
 
 """用 ORM 写入三张表后，换一个 ORM Session 仍能读到关联数据和精确金额字符串。"""

@@ -4,14 +4,14 @@ TravelMindAI 提供 Vue 旅行需求对话页和 Python 后端，支持自然语
 
 ## 主要功能
 
-- **旅行需求对话**：Vue与Arco组件构建聊天页，调用DeepSeek提取需求、集中追问缺项，支持多轮修改、指定限制删除和变化高亮。当前对话保存在页面内存，刷新后重新开始。
+- **旅行需求对话**：Vue与Arco组件构建聊天页，调用DeepSeek提取需求、集中追问缺项，支持多轮修改、指定限制删除和变化高亮。成功对话保存到PostgreSQL，同一标签页刷新后可恢复聊天与需求，并继续修改。
 
 - **旅行预算估算**：根据行程天数、同行人数、总预算和住宿档位计算全团费用，支持 2–5 天、1–8 人的行程。
 - **费用明细与预算判断**：返回住宿、城际交通、市内交通、餐饮、门票及活动费用，并计算预留金、预计总额、余额和是否超支。
 - **输入校验**：校验金额精度、人数、天数、住宿类型与日期一致性，拒绝未知字段和非法输入。
 - **接口文档与请求追踪**：提供 Swagger UI、OpenAPI 描述、健康检查，以及响应体和响应头中的请求编号。
 - **PostgreSQL 连接工具**：提供独立的只读连接检查命令，支持延迟连接、连接超时和连接信息脱敏。
-- **业务表与迁移**：SQLAlchemy 定义会话、旅行需求和行程版本表，Alembic 显式管理表结构版本。
+- **业务表与迁移**：SQLAlchemy 定义会话、需求对话、旅行需求和行程版本表，Alembic 显式管理表结构版本。
 - **草稿存储**：Python 和 HTTP 接口均支持创建/读取会话、原子保存需求和行程快照、读取最新或历史版本；费用由后端计算。
 
 预算使用 `demo-cny-v1` 固定演示单价，金额单位为人民币，不代表实时酒店、交通或门票报价。预算计算无需模型 API Key，也不依赖数据库连接。
@@ -66,11 +66,12 @@ python -m uv run --locked uvicorn app.main:create_app --factory --reload --host 
 
 ### 启动旅行需求对话页
 
-后端的`.env`填写`TRAVELMIND_DEEPSEEK_API_KEY`，并可设置`TRAVELMIND_DEEPSEEK_MODEL=deepseek-v4-pro`；不要将密钥放到前端。也兼容显式配置文件中的`DS_API_KEY`。
+后端的`.env`填写`TRAVELMIND_DATABASE_URL`和`TRAVELMIND_DEEPSEEK_API_KEY`，并可设置`TRAVELMIND_DEEPSEEK_MODEL=deepseek-v4-pro`；不要将密钥放到前端。也兼容显式配置文件中的`DS_API_KEY`。
 
-在`backend`目录启动后端：
+确保PostgreSQL运行，在`backend`目录升级数据库并启动后端：
 
 ```powershell
+./.venv/Scripts/python.exe -X utf8 -m alembic -x env_file=.env upgrade head
 ./.venv/Scripts/python.exe -X utf8 -m uvicorn app.main:create_app --factory --env-file .env --host 127.0.0.1 --port 8000
 ```
 
@@ -81,9 +82,9 @@ npm ci
 npm run dev
 ```
 
-打开 [旅行需求对话](http://127.0.0.1:5173/)。依次输入“想去杭州”“三天两个人预算五千”“改成三个人”，右侧展示更新后的需求。当前仅整理需求，不生成逐日行程；每次发送会调用模型。
+打开 [旅行需求对话](http://127.0.0.1:5173/)。依次输入“想去杭州”“三天两个人预算五千”“改成三个人”，右侧展示更新后的需求。刷新本标签页可继续聊天；当前仅整理需求，不生成逐日行程。新消息调用模型，读取历史或重试已经保存的消息不再次调用模型。
 
-页面通过`POST /api/v1/requirements/messages`传递原话和上一轮需求，`GET /api/v1/requirements/status`只检查模型配置，不发送模型请求。生产打包用`npm run build`；正式部署需为`/api`配置同源反向代理。
+页面首次发送时创建会话，通过`GET/POST /api/v1/sessions/{id}/requirement-messages`读取或追加对话；上一轮需求由后端读取，`GET /api/v1/requirements/status`只检查模型配置，不发送模型请求。生产打包用`npm run build`；正式部署需为`/api`配置同源反向代理。当前按本机单用户使用，尚无归属鉴权、跨设备恢复和历史会话列表；重新开始不删除旧记录。
 
 ### 启用会话和草稿接口
 
@@ -268,6 +269,23 @@ TravelMindAI/
 ```
 
 `old_learn/` 收录 LangChain 与 LangGraph 示例，包括提示词模板、流式输出、结构化输出、工具调用和对话历史。示例与后端应用独立，部分脚本需要额外依赖、模型密钥或外部服务。
+
+## 固定样例评测
+
+提供30组36轮人工标注题库，覆盖完整输入、缺项、相对日期、金额推导、多轮修改和范围限制。命令复用正式抽取/合并服务，不写旅行会话库。
+
+在`backend`目录执行：
+
+```powershell
+# 仅检查题库，无需密钥、不调用模型。
+./.venv/Scripts/python.exe -X utf8 -m scripts.evaluate_requirements
+# 真实评测会产生模型调用费用；显式指定模型配置文件。
+./.venv/Scripts/python.exe -X utf8 -m scripts.evaluate_requirements --live --env-file .env
+```
+
+结果写入`backend/evals/reports/`，包含字段分子/分母、失败案例、耗时和模型请求次数。每次生成新报告；已有路径拒绝覆盖。模型失败也计错，多轮使用实际历史，标准答案不进入模型提示。
+
+该题库属于人工开发集，不代表真实用户分布。日期、意图与整题通过率应和四项必要字段指标一起阅读。
 
 ## 开发检查
 

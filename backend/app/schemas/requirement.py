@@ -79,5 +79,6 @@ class RequirementResult(BaseModel):
     extraction: TravelRequestExtraction  # 已通过校验的旅行需求。
     missing_required_fields: list[RequiredField]  # 程序检查后得到的必填缺失项。
     clarification: str | None  # 集中追问；信息充分或非规划意图时为空。
-    # 记录本次消息是在规划、修改还是闲聊。
+    # 记录经过上下文规则校正后的本轮业务意图，不是模型未经处理的原始标签。
+    # 没有旧档案时的modify_trip会转为plan_trip；已有档案的修改仍为modify_trip。
     message_intent: Intent | None = None

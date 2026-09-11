@@ -1,0 +1,43 @@
+graph TB
+    U["用户"]
+
+    subgraph 前端
+        CHAT["对话页 App.vue<br>消息、输入框、发送状态"]
+        PANEL["需求面板 RequirementPanel.vue<br>已识别信息、缺失项、修改提示"]
+        API["前端接口层 requirements.ts<br>发送消息、查询模型配置状态"]
+        CHAT --> API
+        CHAT --> PANEL
+    end
+
+    subgraph 后端
+        ENTRY["应用入口 main.py<br>注册接口、加载配置、统一错误处理"]
+        ROUTE["M2 需求接口<br>/requirements/messages"]
+        SERVICE["需求处理服务<br>提示词、模型调用、校验、补问"]
+        MERGE["多轮需求合并<br>覆盖、追加、移除、清空"]
+        LLM["模型适配层<br>DeepSeekClient"]
+        BUDGET_API["M1 预算接口<br>/budget/estimate"]
+        CALC["预算计算服务<br>固定规则 + Decimal"]
+        SESSION_API["M1 会话和草稿接口<br>/sessions"]
+        STORE["草稿存储服务 TripService<br>事务、版本、读取"]
+
+        ENTRY --> ROUTE
+        ENTRY --> BUDGET_API
+        ENTRY --> SESSION_API
+        ROUTE --> SERVICE
+        SERVICE --> LLM
+        SERVICE --> MERGE
+        BUDGET_API --> CALC
+        SESSION_API --> CALC
+        SESSION_API --> STORE
+    end
+
+    DS["DeepSeek 云端模型"]
+    DB["PostgreSQL<br>会话 / 需求快照 / 行程快照"]
+    OTHER["接口文档 / 脚本 / 其他调用方"]
+
+    U --> CHAT
+    API -->|"HTTP /api/v1"| ENTRY
+    LLM -->|"LangChain ChatOpenAI"| DS
+    STORE -->|"SQLAlchemy + psycopg"| DB
+    OTHER --> BUDGET_API
+    OTHER --> SESSION_API

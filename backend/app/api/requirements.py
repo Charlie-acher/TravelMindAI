@@ -68,7 +68,14 @@ def send_message(
     status: Literal["needs_clarification", "complete", "unsupported"]
     if result.message_intent not in {"plan_trip", "modify_trip"}:
         status = "unsupported"
-        reply = "当前页面用于整理和修改旅行需求。你可以告诉我目的地、时间、人数和预算。"
+        # 非规划意图不更新卡片；把目前能处理的范围说清楚，方便用户继续调整。
+        # 这里只展示程序维护的范围，不把模型assumptions直接当作面向用户的回复。
+        reply = (
+            "当前页面可以帮你整理单个目的地、2～5天、1～8人的旅行需求，预算按人民币计算。"
+            "你可以调整旅行条件，或先告诉我想去哪里，我们一起补充。"
+        )
+        if payload.previous is not None:
+            reply += "之前的旅行需求已保留。"
         changed = []
     elif result.clarification:
         status = "needs_clarification"

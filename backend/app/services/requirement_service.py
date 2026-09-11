@@ -24,6 +24,14 @@ class RequirementExtractionError(RuntimeError):
     """需求提取异常类：表示模型结果未通过校验。"""
 
 
+# 空会话还没有可修改的需求记录，引导用户从目的地开始，不暴露技术校验术语。
+NO_PROFILE_MESSAGE = (
+    "我们还没有建立旅行档案，暂时没有可以修改或取消的内容。"
+    "可以先从目的地开始，告诉我你想去哪里，比如“我想去杭州”。"
+    "之后我们再一起补充时间、人数和预算。"
+)
+
+
 # dict 保留插入顺序，所以每次追问都按目的地、时间、人数、预算排列。
 REQUIRED_LABELS: dict[RequiredField, str] = {
     "destination": "目的地",
@@ -90,17 +98,29 @@ def extract_requirements(
             + previous.model_dump_json(),
         })
     messages.append({"role": "user", "content": message})
+    failure_message = (
+        NO_PROFILE_MESSAGE if previous is None else
+        "这次修改我还没能准确理解，之前的旅行需求已保留。"
+        "可以换一种说法，告诉我你想调整哪一项吗？"
+    )
     # range(2) 清楚地表达最多两次：首次抽取 + 一次修复，没有无限重试。
     for attempt in range(2):
         answer = model.generate_json(messages)
         try:
             update = RequirementUpdate.model_validate_json(answer)
+            # 没有历史时无法执行删除/清空；这不是再问一次模型就能补出的上下文。
+            # 直接说明缺少旅行档案，不假装取消成功，也不编造一份旧需求。
+            if previous is None and (any(update.remove_items.values()) or update.clear_fields):
+                raise RequirementExtractionError(NO_PROFILE_MESSAGE)
+            # 是否已有档案由程序掌握，不能让模型把首次需求误标成修改。
+            # 必须放在删除/清空检查之后，避免把缺少历史的撤销指令当成建档成功。
+            # 仅校正这两个规划类标签，不将闲聊或不支持的请求转换成旅行需求。
+            if previous is None and update.intent == "modify_trip":
+                update = update.model_copy(update={"intent": "plan_trip"})
             extraction = merge_requirements(previous, update)
         except (ValidationError, ValueError) as error:
             if attempt == 1:
-                raise RequirementExtractionError(
-                    "模型输出未通过旅行需求校验，请重新描述需求"
-                ) from None
+                raise RequirementExtractionError(failure_message) from None
             # 只发送字段位置与校验原因，不发送Pydantic原始input或异常上下文对象。
             errors = (
                 error.errors(include_input=False, include_context=False, include_url=False)
@@ -121,4 +141,4 @@ def extract_requirements(
             result = build_result(message, reference_date, extraction)
             return result.model_copy(update={"message_intent": update.intent})
     # 上面每条路径都会return或raise；保留明确异常让类型检查也知道不会返回None。
-    raise RequirementExtractionError("模型输出未通过旅行需求校验")
+    raise RequirementExtractionError(failure_message)

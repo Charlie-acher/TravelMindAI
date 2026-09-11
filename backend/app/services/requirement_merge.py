@@ -82,7 +82,12 @@ def merge_requirements(
         )
     for field in update.clear_fields:
         data[field] = [] if field in LIST_FIELDS else None
-    if previous is not None:
+    # 首轮也可能已经给出开始日和天数，此时复用同一套“首日计入”的结束日计算。
+    # 首轮明确给出两个日期的情况仍由build_result补天数并记录依据；
+    # reconcile_dates内部优先检查清空指令，不能把用户刚清掉的日期又补回来。
+    if previous is not None or (
+        update.start_date is not None and update.end_date is None and update.days is not None
+    ):
         reconcile_dates(data, update)
     # 新字典中的Decimal和date仍保持Python类型，无须先转JSON再转回来。
     return TravelRequestExtraction.model_validate(data)

@@ -110,6 +110,33 @@ def test_partial_date_is_not_invented(complete_payload: dict[str, object]) -> No
     assert result.missing_required_fields == ["days"]
 
 
+"""首轮开始日加天数即可算结束日；首日计入，并覆盖跨月、跨年和闰日。"""
+
+@pytest.mark.parametrize(
+    ("start", "expected_end"),
+    [
+        ("2026-10-01", "2026-10-03"),
+        ("2026-10-30", "2026-11-01"),
+        ("2026-12-31", "2027-01-02"),
+        ("2028-02-28", "2028-03-01"),
+    ],
+)
+def test_first_turn_start_and_days_determine_end(
+    complete_payload: dict[str, object], start: str, expected_end: str,
+) -> None:
+    complete_payload.update(start_date=start, end_date=None, days=3)
+    result = extract_requirements(
+        f"想去杭州三天，从{start}开始",
+        FakeModel([json.dumps(complete_payload)]),
+        reference_date=date(2026, 9, 11),
+    )
+    assert result.extraction.start_date == date.fromisoformat(start)
+    assert result.extraction.end_date == date.fromisoformat(expected_end)
+    assert result.extraction.days == 3
+    assert result.extraction.assumptions
+    assert complete_payload["end_date"] is None
+
+
 """参数化：让不同坏数据走同一条真实校验路径，确认它们均被拒绝。"""
 
 @pytest.mark.parametrize(
@@ -195,6 +222,28 @@ def test_other_intent_does_not_ask_trip_questions(complete_payload: dict[str, ob
         "你好", FakeModel([json.dumps(complete_payload)]), reference_date=date(2026, 9, 9)
     )
     assert result.clarification is None
+    assert result.message_intent == "other"
+
+
+"""没有旧档案时，模型误报修改也应建立需求；缺预算仍要追问，不能填默认值。"""
+
+@pytest.mark.parametrize("budget", ["5000.00", None])
+def test_first_request_normalizes_modify_intent(
+    complete_payload: dict[str, object], budget: str | None,
+) -> None:
+    complete_payload.update(intent="modify_trip", total_budget=budget, pace="relaxed")
+    result = extract_requirements(
+        "杭州三天两人，节奏轻松一点" + ("，预算5000元" if budget else ""),
+        FakeModel([json.dumps(complete_payload)]),
+        reference_date=date(2026, 9, 11),
+    )
+    assert result.message_intent == "plan_trip"
+    assert result.extraction.intent == "plan_trip"
+    assert result.extraction.destination == "杭州" and result.extraction.pace == "relaxed"
+    assert result.missing_required_fields == (["total_budget"] if budget is None else [])
+    if budget is None:
+        assert result.extraction.total_budget is None
+        assert result.clarification is not None and "预算" in result.clarification
 
 
 """第二轮只说人数时，模型看到旧表格，程序合并后仍保留城市和预算。"""

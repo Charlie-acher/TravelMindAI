@@ -17,14 +17,17 @@ from starlette.middleware.base import RequestResponseEndpoint
 from starlette.responses import Response
 
 from app.api.budget import router as budget_router
+from app.api.requirement_history import router as requirement_history_router
 from app.api.requirements import router as requirements_router
 from app.api.trips import router as sessions_router
 from app.config import Settings, load_settings
 from app.database import create_database_engine
 from app.llm.client import ModelClientError
+from app.models.requirement_turn import RequirementTurn
 from app.models.trip import Itinerary, TravelRequest, TravelSession
 from app.schemas.common import ErrorResponse
 from app.services.budget_service import BudgetValidationError
+from app.services.requirement_history import HistoryConflictError
 from app.services.requirement_service import RequirementExtractionError
 from app.services.trip_service import SessionNotFoundError, TripService
 
@@ -140,6 +143,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def missing_session(request: Request, exc: SessionNotFoundError) -> JSONResponse:
         return error_response(request, 404, "SESSION_NOT_FOUND", "旅行会话不存在")
 
+    """对话版本冲突：提示先恢复服务端历史，不能用旧需求静默覆盖新结果。"""
+
+    @app.exception_handler(HistoryConflictError)
+    async def history_conflict(request: Request, exc: HistoryConflictError) -> JSONResponse:
+        return error_response(request, 409, "HISTORY_CONFLICT", str(exc))
+
     """数据库连接异常处理函数：返回数据库暂不可用的错误。"""
 
     @app.exception_handler(OperationalError)
@@ -203,7 +212,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if engine is not None:
             try:
                 with engine.connect() as connection:
-                    for model in [TravelSession, TravelRequest, Itinerary]:
+                    for model in [TravelSession, TravelRequest, Itinerary, RequirementTurn]:
                         # LIMIT 0 校验表与映射字段存在，但不返回任何会话或草稿记录。
                         connection.execute(select(model).limit(0))
                 database_status = "ready"
@@ -226,4 +235,5 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(budget_router, prefix="/api/v1")
     app.include_router(sessions_router, prefix="/api/v1")
     app.include_router(requirements_router, prefix="/api/v1")
+    app.include_router(requirement_history_router, prefix="/api/v1")
     return app

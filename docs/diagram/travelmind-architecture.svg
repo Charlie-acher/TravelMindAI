@@ -1,0 +1,130 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1120 2110" role="img" aria-labelledby="title desc">
+<title id="title">TravelMindAI 完整源码架构图</title>
+<desc id="desc">前端页面、状态与接口层，FastAPI各接口与业务服务，DeepSeek模型及PostgreSQL数据库的完整调用关系。</desc>
+<defs><pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse"><path d="M40 0H0V40" fill="none" stroke="#1e293b" stroke-width="0.6"/></pattern>
+<marker id="arrow-front" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0L8 4L0 8Z" fill="#22d3ee"/></marker>
+<marker id="arrow-back" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0L8 4L0 8Z" fill="#34d399"/></marker>
+<marker id="arrow-db" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0L8 4L0 8Z" fill="#a78bfa"/></marker>
+<marker id="arrow-model" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0L8 4L0 8Z" fill="#fbbf24"/></marker>
+<marker id="arrow-other" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0L8 4L0 8Z" fill="#94a3b8"/></marker>
+</defs><style>text{font-family:"Microsoft YaHei","Noto Sans SC",sans-serif;fill:#f1f5f9}.name{font-size:25px;font-weight:600}.file{font-family:Consolas,"Microsoft YaHei",monospace;font-size:18px;fill:#cbd5e1}.note{font-size:20px;fill:#cbd5e1}.label{font-size:18px;paint-order:stroke;stroke:#0f172a;stroke-width:7px;stroke-linejoin:round}.group{font-size:26px;font-weight:700}</style>
+<rect width="1120" height="2110" fill="#0f172a"/><rect width="1120" height="2110" fill="url(#grid)"/>
+<!-- 分层区域：修改模块时同步调整所属区域和调用连线。 -->
+<rect x="30" y="200" width="1060" height="500" rx="18" fill="#101f31" stroke="#22d3ee" stroke-opacity=".5"/>
+<rect x="30" y="785" width="1060" height="960" rx="18" fill="#102423" stroke="#34d399" stroke-opacity=".5"/>
+<text x="60" y="244" class="group" style="fill:#22d3ee">前端</text><text x="180" y="244" class="note">Vue 3 · TypeScript · Arco Design</text>
+<text x="60" y="829" class="group" style="fill:#34d399">后端</text><text x="180" y="829" class="note">FastAPI · 同一应用中的不同模块</text>
+
+<path d="M560 195V280" fill="none" stroke="#22d3ee" stroke-width="2.4" stroke-linejoin="round" marker-end="url(#arrow-front)"/>
+<path d="M560 380V430" fill="none" stroke="#22d3ee" stroke-width="2.4" stroke-linejoin="round" marker-end="url(#arrow-front)"/>
+<path d="M700 330H910V430" fill="none" stroke="#22d3ee" stroke-width="2.4" stroke-linejoin="round" marker-end="url(#arrow-front)"/>
+<path d="M420 480H350" fill="none" stroke="#22d3ee" stroke-width="2.4" stroke-linejoin="round" marker-end="url(#arrow-front)"/>
+<path d="M560 530V590" fill="none" stroke="#22d3ee" stroke-width="2.4" stroke-linejoin="round" marker-end="url(#arrow-front)"/>
+<path d="M700 330H735V640H700" fill="none" stroke="#22d3ee" stroke-width="2.4" stroke-linejoin="round" marker-end="url(#arrow-front)"/>
+<path d="M560 690V865" fill="none" stroke="#22d3ee" stroke-width="2.4" stroke-linejoin="round" marker-end="url(#arrow-front)"/>
+<path d="M560 965V1035" fill="none" stroke="#34d399" stroke-width="2.4" stroke-linejoin="round" marker-end="url(#arrow-back)"/>
+<path d="M420 915H385V1245H420" fill="none" stroke="#94a3b8" stroke-width="2.4" stroke-linejoin="round" marker-end="url(#arrow-other)" stroke-dasharray="7 6"/>
+<path d="M700 940H745V995H910V1035" fill="none" stroke="#34d399" stroke-width="2.4" stroke-linejoin="round" marker-end="url(#arrow-back)"/>
+<path d="M700 950H760V1215H770" fill="none" stroke="#34d399" stroke-width="2.4" stroke-linejoin="round" marker-end="url(#arrow-back)"/>
+<path d="M420 1085H350" fill="none" stroke="#a78bfa" stroke-width="2.4" stroke-linejoin="round" marker-end="url(#arrow-db)"/>
+<path d="M560 1135V1195" fill="none" stroke="#34d399" stroke-width="2.4" stroke-linejoin="round" marker-end="url(#arrow-back)"/>
+<path d="M560 1295V1355" fill="none" stroke="#34d399" stroke-width="2.4" stroke-linejoin="round" marker-end="url(#arrow-back)"/>
+<path d="M560 1455V1560" fill="none" stroke="#fbbf24" stroke-width="2.4" stroke-linejoin="round" marker-end="url(#arrow-model)"/>
+<path d="M420 1405H210V1560" fill="none" stroke="#34d399" stroke-width="2.4" stroke-linejoin="round" marker-end="url(#arrow-back)"/>
+<path d="M910 1295V1355" fill="none" stroke="#34d399" stroke-width="2.4" stroke-linejoin="round" marker-end="url(#arrow-back)"/>
+<path d="M1050 1085H1075V1405H1050" fill="none" stroke="#34d399" stroke-width="2.4" stroke-linejoin="round" marker-end="url(#arrow-back)"/>
+<path d="M1050 1245H1060V1610H1050" fill="none" stroke="#a78bfa" stroke-width="2.4" stroke-linejoin="round" marker-end="url(#arrow-db)"/>
+<path d="M910 1660V1940" fill="none" stroke="#a78bfa" stroke-width="2.4" stroke-linejoin="round" marker-end="url(#arrow-db)"/>
+<path d="M70 1085H50V2000H770" fill="none" stroke="#a78bfa" stroke-width="2.4" stroke-linejoin="round" marker-end="url(#arrow-db)"/>
+<path d="M560 1678V1810" fill="none" stroke="#fbbf24" stroke-width="2.4" stroke-linejoin="round" marker-end="url(#arrow-model)"/>
+<path d="M910 965V1035" fill="none" stroke="#94a3b8" stroke-width="2.4" stroke-linejoin="round" marker-end="url(#arrow-other)"/>
+<path d="M1050 915H1085V1265H1050" fill="none" stroke="#94a3b8" stroke-width="2.4" stroke-linejoin="round" marker-end="url(#arrow-other)"/>
+<g id="user"><rect x="420" y="95" width="280" height="100" rx="12" fill="#0f172a" stroke="#94a3b8" stroke-width="1.8"/>
+<text x="560" y="134" text-anchor="middle" class="name">用户</text>
+<text x="560" y="167" text-anchor="middle" class="file">自然语言输入</text>
+</g>
+<g id="page"><rect x="420" y="280" width="280" height="100" rx="12" fill="#0f172a" stroke="#22d3ee" stroke-width="1.8"/>
+<text x="560" y="319" text-anchor="middle" class="name">对话主页面</text>
+<text x="560" y="352" text-anchor="middle" class="file">App.vue</text>
+</g>
+<g id="state"><title>useRequirementConversation.ts</title><rect x="420" y="430" width="280" height="118" rx="12" fill="#0f172a" stroke="#22d3ee" stroke-width="1.8"/>
+<text x="560" y="469" text-anchor="middle" class="name">会话状态与恢复</text>
+<text x="560" y="502" text-anchor="middle" class="file">useRequirement</text><text x="560" y="527" text-anchor="middle" class="file">Conversation.ts</text>
+</g>
+<g id="panel"><rect x="770" y="430" width="280" height="100" rx="12" fill="#0f172a" stroke="#22d3ee" stroke-width="1.8"/>
+<text x="910" y="469" text-anchor="middle" class="name">结构化需求面板</text>
+<text x="910" y="502" text-anchor="middle" class="file">RequirementPanel.vue</text>
+</g>
+<g id="tab"><rect x="70" y="430" width="280" height="100" rx="12" fill="#0f172a" stroke="#22d3ee" stroke-width="1.8"/>
+<text x="210" y="469" text-anchor="middle" class="name">标签页会话缓存</text>
+<text x="210" y="502" text-anchor="middle" class="file">sessionStorage</text>
+</g>
+<g id="http"><rect x="420" y="590" width="280" height="100" rx="12" fill="#0f172a" stroke="#22d3ee" stroke-width="1.8"/>
+<text x="560" y="629" text-anchor="middle" class="name">前端接口层</text>
+<text x="560" y="662" text-anchor="middle" class="file">api/requirements.ts</text>
+</g>
+<g id="main"><rect x="420" y="865" width="280" height="100" rx="12" fill="#0f172a" stroke="#34d399" stroke-width="1.8"/>
+<text x="560" y="904" text-anchor="middle" class="name">应用入口与路由</text>
+<text x="560" y="937" text-anchor="middle" class="file">main.py</text>
+</g>
+<g id="history"><rect x="420" y="1035" width="280" height="100" rx="12" fill="#0f172a" stroke="#34d399" stroke-width="1.8"/>
+<text x="560" y="1074" text-anchor="middle" class="name">持久化对话接口</text>
+<text x="560" y="1107" text-anchor="middle" class="file">api/requirement_history.py</text>
+</g>
+<g id="historysvc"><rect x="70" y="1035" width="280" height="100" rx="12" fill="#0f172a" stroke="#a78bfa" stroke-width="1.8"/>
+<text x="210" y="1074" text-anchor="middle" class="name">对话存储服务</text>
+<text x="210" y="1107" text-anchor="middle" class="file">RequirementHistoryService</text>
+</g>
+<g id="budgetapi"><rect x="770" y="1035" width="280" height="100" rx="12" fill="#0f172a" stroke="#34d399" stroke-width="1.8"/>
+<text x="910" y="1074" text-anchor="middle" class="name">预算计算接口</text>
+<text x="910" y="1107" text-anchor="middle" class="file">api/budget.py</text>
+</g>
+<g id="chat"><rect x="420" y="1195" width="280" height="100" rx="12" fill="#0f172a" stroke="#34d399" stroke-width="1.8"/>
+<text x="560" y="1234" text-anchor="middle" class="name">需求抽取接口</text>
+<text x="560" y="1267" text-anchor="middle" class="file">api/requirements.py</text>
+</g>
+<g id="trips"><rect x="770" y="1195" width="280" height="100" rx="12" fill="#0f172a" stroke="#34d399" stroke-width="1.8"/>
+<text x="910" y="1234" text-anchor="middle" class="name">会话与草稿接口</text>
+<text x="910" y="1267" text-anchor="middle" class="file">api/trips.py</text>
+</g>
+<g id="extract"><rect x="420" y="1355" width="280" height="100" rx="12" fill="#0f172a" stroke="#34d399" stroke-width="1.8"/>
+<text x="560" y="1394" text-anchor="middle" class="name">提取、校验与补问</text>
+<text x="560" y="1427" text-anchor="middle" class="file">requirement_service.py</text>
+</g>
+<g id="calc"><rect x="770" y="1355" width="280" height="100" rx="12" fill="#0f172a" stroke="#34d399" stroke-width="1.8"/>
+<text x="910" y="1394" text-anchor="middle" class="name">固定规则预算计算</text>
+<text x="910" y="1427" text-anchor="middle" class="file">budget_service.py</text>
+</g>
+<g id="merge"><rect x="70" y="1560" width="280" height="100" rx="12" fill="#0f172a" stroke="#34d399" stroke-width="1.8"/>
+<text x="210" y="1599" text-anchor="middle" class="name">多轮需求合并</text>
+<text x="210" y="1632" text-anchor="middle" class="file">requirement_merge.py</text>
+</g>
+<g id="client"><rect x="420" y="1560" width="280" height="118" rx="12" fill="#0f172a" stroke="#fbbf24" stroke-width="1.8"/>
+<text x="560" y="1599" text-anchor="middle" class="name">模型适配层</text>
+<text x="560" y="1632" text-anchor="middle" class="file">DeepSeekClient</text>
+<text x="560" y="1657" text-anchor="middle" class="file">LangChain ChatOpenAI</text>
+</g>
+<g id="save"><rect x="770" y="1560" width="280" height="100" rx="12" fill="#0f172a" stroke="#a78bfa" stroke-width="1.8"/>
+<text x="910" y="1599" text-anchor="middle" class="name">草稿版本与事务</text>
+<text x="910" y="1632" text-anchor="middle" class="file">TripService</text>
+</g>
+<g id="cloud"><rect x="420" y="1810" width="280" height="100" rx="12" fill="#0f172a" stroke="#fbbf24" stroke-width="1.8"/>
+<text x="560" y="1849" text-anchor="middle" class="name">DeepSeek 云端模型</text>
+<text x="560" y="1882" text-anchor="middle" class="file">JSON 提取 · 最多一次修正</text>
+</g>
+<g id="db"><rect x="770" y="1940" width="280" height="118" rx="12" fill="#0f172a" stroke="#a78bfa" stroke-width="1.8"/>
+<text x="910" y="1979" text-anchor="middle" class="name">PostgreSQL</text>
+<text x="910" y="2012" text-anchor="middle" class="file">会话 · 对话轮次</text>
+<text x="910" y="2037" text-anchor="middle" class="file">需求快照 · 行程草稿</text>
+</g>
+<g id="other"><rect x="770" y="865" width="280" height="100" rx="12" fill="#0f172a" stroke="#94a3b8" stroke-width="1.8"/>
+<text x="910" y="904" text-anchor="middle" class="name">接口文档与脚本</text>
+<text x="910" y="937" text-anchor="middle" class="file">预算与草稿的调用方</text>
+</g>
+<text x="580" y="748" class="label" style="fill:#22d3ee">HTTP /api/v1</text>
+<text x="60" y="1880" class="label" style="fill:#a78bfa">SQLAlchemy + psycopg</text>
+<text x="580" y="1790" class="label" style="fill:#fbbf24">模型调用</text>
+<text x="60" y="55" font-size="34" font-weight="700">TravelMindAI · 完整源码架构</text>
+<text x="60" y="1730" class="note">虚线：仍保留的无状态抽取入口。实线：调用或数据访问；结果沿调用链返回。</text>
+<text x="60" y="2076" class="note">聊天与预算草稿共享会话；聊天完成后尚未自动计算预算或生成行程。</text>
+</svg>

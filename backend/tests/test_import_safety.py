@@ -60,6 +60,12 @@ import app.schemas.requirement_update
 import app.schemas.requirement_chat
 import app.services.requirement_merge
 import app.api.requirements
+import app.models.requirement_turn
+import app.schemas.requirement_history
+import app.services.requirement_history
+import app.api.requirement_history
+import scripts.requirement_eval
+import scripts.evaluate_requirements
 """
     result = subprocess.run(
         [sys.executable, "-c", program],
