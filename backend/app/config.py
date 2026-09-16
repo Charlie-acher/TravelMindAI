@@ -1,16 +1,16 @@
 """
-配置层：读取并校验应用、数据库和模型配置。
+配置层：读取并校验应用、数据库、模型和资料保存目录的设置。
 """
 
 from pathlib import Path
 from typing import Literal
 
-from pydantic import AliasChoices, Field, SecretStr
+from pydantic import AliasChoices, Field, HttpUrl, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    """应用配置类：保存应用名称、运行环境、数据库和模型设置。"""
+    """应用配置类：集中保存各模块需要的配置，供应用启动和业务服务使用。"""
 
     # Field 给字段增加校验规则：名称至少一个字符，不能是空字符串。
     app_name: str = Field(default="TravelMindAI", min_length=1)
@@ -24,6 +24,10 @@ class Settings(BaseSettings):
     # None 表示没有配置数据库，已有的纯预算接口仍可使用。
     database_url: SecretStr | None = None
 
+    # 原文件默认保存到backend/data/uploads，从哪个目录启动都使用同一位置。
+    # 可通过环境变量改为其他绝对路径；这里仅记录路径，不创建目录。
+    document_upload_dir: Path = Path(__file__).resolve().parents[2] / "data" / "uploads"
+
     # 单模型抽取配置；未提供密钥时，原来的预算、数据库服务仍能启动。
     # 优先使用正式变量名，同时兼容学习示例里的DS_API_KEY。
     # 兼容变量名不会自动读取根目录.env，仍须显式传env_file路径。
@@ -35,6 +39,29 @@ class Settings(BaseSettings):
     deepseek_model: str = Field(default="deepseek-v4-pro", min_length=1)
     # HTTP连接、读、写和连接池等待均使用此超时秒数，不能为0或无穷大。
     deepseek_timeout_seconds: float = Field(default=30, gt=0, allow_inf_nan=False)
+
+    # 向量服务独立配置，不借用聊天模型的地址、名称或密钥。
+    # 暂未开通时留空，已有Web功能仍可启动；试跑命令会检查是否配齐。
+    embedding_provider: str | None = Field(default=None, min_length=1)
+    embedding_base_url: HttpUrl | None = None  # API根地址，例如https://服务域名/v1。
+    embedding_model: str | None = Field(default=None, min_length=1)
+    embedding_api_key: SecretStr | None = None
+    # 维度是每段文字返回的数字个数；这里只核对模型原生维度，不要求服务降维。
+    embedding_dimensions: int | None = Field(default=None, ge=1, le=65536)
+    embedding_version: str | None = Field(default=None, min_length=1)  # 本项目的索引版本标签。
+    embedding_timeout_seconds: float = Field(default=30, gt=0, allow_inf_nan=False)
+
+    # Milvus只在明确配置后启用；本地Docker端口仅绑定127.0.0.1。
+    milvus_url: HttpUrl | None = None
+    milvus_timeout_seconds: float = Field(default=30, gt=0, allow_inf_nan=False)
+
+    # 高德Web服务密钥只由后端使用；留空时不发地图请求，也不影响知识库回答。
+    amap_api_key: SecretStr | None = None
+
+    # 联网搜索独立于DeepSeek；没有搜索Key时仍可使用知识库，页面标明尚未补查。
+    tavily_api_key: SecretStr | None = None
+    # 首版只检索政府公开信息；可显式添加已核实的景区官网域名，不自动信任任意网站。
+    travel_web_domains: list[str] = Field(default_factory=lambda: ["gov.cn"])
 
     # 环境变量和配置文件的读取规则。
     model_config = SettingsConfigDict(

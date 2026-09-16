@@ -1,0 +1,6 @@
+# 部署配置层：内嵌etcd保存Milvus元数据，仅在容器内部监听。
+listen-client-urls: http://127.0.0.1:2379
+advertise-client-urls: http://127.0.0.1:2379
+quota-backend-bytes: 4294967296 # 元数据容量上限4GiB。
+auto-compaction-mode: revision
+auto-compaction-retention: "1000" # 保留最近1000个元数据修订版本。

@@ -15,7 +15,7 @@ from pydantic import ValidationError
 
 from app.config import load_settings
 from app.llm.client import DeepSeekClient, ModelClientError
-from app.services.requirement_service import RequirementExtractionError, extract_requirements
+from app.services.requirement.extract import RequirementExtractionError, extract_requirements
 
 """解析参数并执行一次抽取；成功返回0，配置或抽取失败返回1。
 

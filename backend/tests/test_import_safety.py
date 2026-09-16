@@ -51,21 +51,31 @@ import app.main
 import app.models
 import app.schemas.common
 import scripts.check_db
-import app.schemas.requirement
-import app.services.requirement_prompt
-import app.services.requirement_service
+import app.schemas.requirement.base
+import app.services.requirement.prompt
+import app.services.requirement.extract
 import app.llm.client
 import scripts.demo_requirement
-import app.schemas.requirement_update
-import app.schemas.requirement_chat
-import app.services.requirement_merge
-import app.api.requirements
+import app.schemas.requirement.update
+import app.schemas.requirement.chat
+import app.services.requirement.merge
+import app.api.requirement.routes
 import app.models.requirement_turn
-import app.schemas.requirement_history
-import app.services.requirement_history
-import app.api.requirement_history
+import app.schemas.requirement.history
+import app.services.requirement.history
+import app.api.requirement.history
 import scripts.requirement_eval
 import scripts.evaluate_requirements
+import app.llm.embeddings
+import scripts.demo_embedding
+import app.services.document.vector_store
+import app.services.document.search
+import app.schemas.document.search
+import app.api.document.search
+import app.schemas.document.answer
+import app.services.document.answer
+import app.services.chat.rag
+import app.services.amap
 """
     result = subprocess.run(
         [sys.executable, "-c", program],

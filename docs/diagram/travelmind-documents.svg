@@ -1,0 +1,74 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1710" role="img" aria-label="资料流程 · M3知识库准备、使用与删除">
+<defs><style>text{font-family:'Microsoft YaHei','Noto Sans SC',sans-serif;fill:#24344b}.sub{fill:#5c6f86}.small{font-size:19px}.body{font-size:21px}.name{font-size:25px;font-weight:700}</style>
+<marker id="arrow" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0 0 L9 4.5 L0 9Z" fill="#899db5"/></marker></defs>
+<rect width="1080" height="1710" fill="#f7f9fc" rx="18"/>
+<!-- 图形按层绘制；主线向下，分支只在相邻节点之间连接。 -->
+<text x="44" y="58" font-size="32" fill="#172b45" style="fill:#172b45" font-weight="700" text-anchor="start">资料流程 · M3知识库准备与使用</text>
+<text x="44" y="94" font-size="20" fill="#5c6f86" style="fill:#5c6f86" font-weight="400" text-anchor="start">上传后自动切片与索引；标签本地预填，已索引内容可用于语义检索</text>
+<rect x="30" y="125" width="1020" height="660" rx="14" fill="#eef2f7" stroke="#d5dfeb"/>
+<text x="50" y="157" font-size="21" fill="#5c6f86" style="fill:#5c6f86" font-weight="700" text-anchor="start">A  准备知识库</text>
+<g data-box="55,185,720,137"><rect x="55" y="185" width="720" height="137" rx="10" fill="#ffffff" stroke="#b1d6c8" stroke-width="1.7"/>
+<text x="75" y="221" font-size="24" fill="#238366" style="fill:#238366" font-weight="700" text-anchor="start">01 多选文件，逐份上传与校验</text>
+<text x="75" y="255" font-size="21" fill="#3e5168" style="fill:#3e5168" font-weight="400" text-anchor="start">PDF / DOCX / TXT / Markdown</text>
+<text x="75" y="286" font-size="21" fill="#3e5168" style="fill:#3e5168" font-weight="400" text-anchor="start">逐项结果、暂停上传；保存后自动切片和索引</text>
+</g>
+<path d="M415,322 L415,365" fill="none" stroke="#899db5" stroke-width="2" marker-end="url(#arrow)"/>
+<g data-box="55,370,720,137"><rect x="55" y="370" width="720" height="137" rx="10" fill="#ffffff" stroke="#b1d6c8" stroke-width="1.7"/>
+<text x="75" y="406" font-size="24" fill="#238366" style="fill:#238366" font-weight="700" text-anchor="start">02 解析并保存正文</text>
+<text x="75" y="440" font-size="21" fill="#3e5168" style="fill:#3e5168" font-weight="400" text-anchor="start">保留页码、标题和原文顺序</text>
+<text x="75" y="471" font-size="21" fill="#3e5168" style="fill:#3e5168" font-weight="400" text-anchor="start">原文件保存到本地，正文档案写入PostgreSQL</text>
+</g>
+<path d="M415,507 L415,550" fill="none" stroke="#899db5" stroke-width="2" marker-end="url(#arrow)"/>
+<g data-box="55,555,720,137"><rect x="55" y="555" width="720" height="137" rx="10" fill="#ffffff" stroke="#b1d6c8" stroke-width="1.7"/>
+<text x="75" y="591" font-size="24" fill="#238366" style="fill:#238366" font-weight="700" text-anchor="start">03 自动切片并建立索引</text>
+<text x="75" y="625" font-size="21" fill="#3e5168" style="fill:#3e5168" font-weight="400" text-anchor="start">正文切分 → 保存固定片段编号</text>
+<text x="75" y="656" font-size="21" fill="#3e5168" style="fill:#3e5168" font-weight="400" text-anchor="start">每批最多8段 → 阿里云Embedding → Milvus</text>
+</g>
+<g data-box="815,185,210,137"><rect x="815" y="185" width="210" height="137" rx="10" fill="#ffffff" stroke="#cec0e1" stroke-width="1.7"/>
+<text x="835" y="221" font-size="24" fill="#7956a8" style="fill:#7956a8" font-weight="700" text-anchor="start">预填并可修改</text>
+<text x="835" y="255" font-size="19" fill="#3e5168" style="fill:#3e5168" font-weight="400" text-anchor="start">城市 / 来源识别</text>
+<text x="835" y="286" font-size="19" fill="#3e5168" style="fill:#3e5168" font-weight="400" text-anchor="start">待审核 / POI可空</text>
+</g>
+<g data-box="815,370,210,137"><rect x="815" y="370" width="210" height="137" rx="10" fill="#ffffff" stroke="#cec0e1" stroke-width="1.7"/>
+<text x="835" y="406" font-size="24" style="fill:#7956a8" font-weight="700">可后台重试</text>
+<text x="835" y="440" font-size="18" style="fill:#3e5168">核对并重读原件</text>
+<text x="835" y="471" font-size="18" style="fill:#3e5168">保留同一资料编号</text>
+</g>
+<g data-box="815,555,210,137"><rect x="815" y="555" width="210" height="137" rx="10" fill="#ffffff" stroke="#cec0e1" stroke-width="1.7"/>
+<text x="835" y="591" font-size="24" fill="#7956a8" style="fill:#7956a8" font-weight="700" text-anchor="start">可后台续建</text>
+<text x="835" y="625" font-size="18" fill="#3e5168" style="fill:#3e5168" font-weight="400" text-anchor="start">已成功部分保留</text>
+<text x="835" y="656" font-size="18" fill="#3e5168" style="fill:#3e5168" font-weight="400" text-anchor="start">可暂停、继续</text>
+</g>
+<text x="60" y="721" font-size="18" class="sub">后台最多同时两份，任务写入document_jobs（0007）；关闭页面继续，暂停后手动续建。</text>
+<text x="60" y="748" font-size="18" class="sub">启动识别中断，失败须显式重试；索引数量以Milvus读回为准，已成功部分保留。</text>
+<text x="60" y="775" font-size="18" class="sub">city / source / review_status / poi_id写入documents（0006）；更新标签无需重建索引。</text>
+<path d="M415,785 L415,825" fill="none" stroke="#899db5" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="30" y="830" width="1020" height="420" rx="14" fill="#eef2f7" stroke="#d5dfeb"/>
+<text x="50" y="862" font-size="21" fill="#5c6f86" style="fill:#5c6f86" font-weight="700" text-anchor="start">B  使用知识库</text>
+<g data-box="55,885,970,127"><rect x="55" y="885" width="970" height="127" rx="10" fill="#ffffff" stroke="#cec0e1" stroke-width="1.7"/>
+<text x="75" y="921" font-size="24" fill="#7956a8" style="fill:#7956a8" font-weight="700" text-anchor="start">04 用户提问，搜索相关片段</text>
+<text x="75" y="955" font-size="20" fill="#3e5168" style="fill:#3e5168" font-weight="400" text-anchor="start">PostgreSQL先按归属、可用状态及城市/来源/审核/POI筛出候选资料</text>
+<text x="75" y="987" font-size="19" style="fill:#3e5168">问题转向量 → Milvus限定候选编号搜索（每500份一批）→ 回库核对原文</text>
+</g>
+<path d="M310,1012 L310,1057" fill="none" stroke="#899db5" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M790,1012 L790,1057" fill="none" stroke="#899db5" stroke-width="2" marker-end="url(#arrow)"/>
+<g data-box="55,1062,455,149"><rect x="55" y="1062" width="455" height="149" rx="10" fill="#ffffff" stroke="#b8cee7" stroke-width="1.7"/>
+<text x="75" y="1098" font-size="24" fill="#346cb2" style="fill:#346cb2" font-weight="700" text-anchor="start">主聊天 · RAG</text>
+<text x="75" y="1132" font-size="21" fill="#3e5168" style="fill:#3e5168" font-weight="400" text-anchor="start">结合网页与地图生成回答和景点卡片</text>
+<text x="75" y="1163" font-size="21" fill="#3e5168" style="fill:#3e5168" font-weight="400" text-anchor="start">核对来源编号后保存整轮</text>
+</g>
+<g data-box="550,1062,475,149"><rect x="550" y="1062" width="475" height="149" rx="10" fill="#ffffff" stroke="#a9cdd7" stroke-width="1.7"/>
+<text x="570" y="1098" font-size="24" fill="#197a94" style="fill:#197a94" font-weight="700" text-anchor="start">资料页 · 原文搜索</text>
+<text x="570" y="1132" font-size="21" fill="#3e5168" style="fill:#3e5168" font-weight="400" text-anchor="start">展示命中文件、片段与位置</text>
+<text x="570" y="1163" font-size="21" fill="#3e5168" style="fill:#3e5168" font-weight="400" text-anchor="start">标签留空不限；不改变聊天默认范围</text>
+</g>
+<rect x="30" y="1280" width="1020" height="330" rx="14" fill="#eef2f7" stroke="#d5dfeb"/>
+<text x="50" y="1318" class="body" font-weight="700">C  删除资料 · 失败可重试</text>
+<rect x="55" y="1340" width="970" height="218" rx="10" fill="#fff" stroke="#b1d6c8" stroke-width="1.7"/>
+<text x="75" y="1378" class="name">确认删除 → 提交deleting状态 → 退出新检索</text>
+<text x="75" y="1420" class="body">各模型版本的向量 → 原文件 → 档案、关联片段与后台任务</text>
+<text x="75" y="1462" class="body">索引与删除共用资料行锁；其他资料和其他归属的数据保留</text>
+<text x="75" y="1504" class="body">中断保留“待清理”，刷新后可重试；历史聊天快照保持原样</text>
+<text x="60" y="1590" class="small sub">删除不调用Embedding或大模型；只有全部清理成功才从列表移除。</text>
+<text x="44" y="1660" font-size="19" class="sub">PostgreSQL保存正文和位置；Milvus保存向量与编号，两者通过片段编号关联。</text>
+</svg>

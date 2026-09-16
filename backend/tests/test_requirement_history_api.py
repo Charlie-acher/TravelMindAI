@@ -1,17 +1,36 @@
 """持久化对话接口验收：HTTP和PostgreSQL走真实实现，只替换收费模型。"""
 
+from unittest.mock import Mock
 from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import Engine
 
-from app.api.requirement_history import get_history_service, get_saved_model
+from app.api.requirement.history import get_history_service, get_saved_model
 from app.config import Settings
 from app.main import create_app
-from app.services.requirement_history import RequirementHistoryService
+from app.schemas.document.search import SearchResult
+from app.services.requirement.history import RequirementHistoryService
 from app.services.trip_service import TripService
-from tests.test_requirement_api import FakeModel, answer
+from tests.helpers import FakeModel, answer
+
+"""空知识库替身函数：M2回归仍走RAG调用链，但无证据时不额外消耗假模型输出。"""
+
+
+@pytest.fixture(autouse=True)
+def empty_knowledge(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.api.requirement import history as requirement_history
+
+    search = Mock()
+    search.search.return_value = SearchResult(items=[])
+
+    """检索依赖替身函数：提供空结果，供原有需求存储回归使用。"""
+
+    def searches(request: object):
+        yield search
+
+    monkeypatch.setattr(requirement_history, "get_search_service", searches)
 
 """请求只带原话及版本，客户端没有previous字段；上下文必须从数据库恢复。"""
 
@@ -60,7 +79,7 @@ def test_refresh_continue_retry_and_isolation(store_engine: Engine) -> None:
         assert fields["days"] == 3 and fields["total_budget"] == "5000"
         assert (
             refreshed.post(url, json=message("你好", 2)).json()["response"]["status"]
-            == "unsupported"
+            == "knowledge"
         )
         continued = refreshed.post(url, json=message("从银川出发", 3)).json()
         assert continued["response"]["result"]["extraction"]["travelers"] == 3

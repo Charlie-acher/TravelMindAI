@@ -3,13 +3,16 @@
 */
 import { computed, nextTick, ref } from 'vue'
 import {
-  ApiError, createConversation, readConversation, sendRequirement,
+  createConversation, readConversation, sendRequirement,
   type ChatResponse, type PendingMessage, type SavedTurn,
 } from './api/requirements'
+import { ApiError } from './api/http'
+import type { AttractionCard } from './api/documents'
 
-interface ChatMessage { id: string; role: 'user' | 'assistant'; text: string; failed?: boolean }
+/** 消息类型：气泡只展示自然语言，知识依据由后端保存和校验。 */
+interface ChatMessage { id: string; role: 'user' | 'assistant'; text: string; failed?: boolean; attractions?: AttractionCard[]; clarification?: string | null }
 const storageKey = 'travelmind.requirement-conversation.v1'
-const welcome = '你好，想去哪里旅行？\n告诉我你的时间、人数和预算，也可以先说一个想法，我们一起补充。'
+const welcome = '你好，想去哪里旅行？\n你可以告诉我时间、人数和预算，也可以先问问感兴趣的地方。无法确认的信息，我会直接说明。'
 
 /** 每次调用创建独立状态；App只调用一次，不把不同会话放进全局共享变量。 */
 export function useRequirementConversation() {
@@ -45,11 +48,17 @@ export function useRequirementConversation() {
 
   /** 将已提交的整轮数据画到页面；不支持的意图只显示文字，不覆盖有效需求。 */
   function showTurn(turn: SavedTurn): void {
+    // 旧历史可能已经拼入[1]等引用，只在显示时去掉已知编号，不改数据库快照。
+    const references = new Set([
+      ...(turn.response.knowledge?.sources.map(source => source.id) ?? []),
+      ...(turn.response.knowledge?.web_search?.items.map(source => source.id) ?? []),
+    ])
+    const reply = turn.response.reply.replace(/ ?\[(\d+)\]/g, (match, id: string) => references.has(Number(id)) ? '' : match)
     messages.value.push(
       { id: `${turn.message_id}-user`, role: 'user', text: turn.response.result.original_message },
-      { id: `${turn.message_id}-assistant`, role: 'assistant', text: turn.response.reply },
+      { id: `${turn.message_id}-assistant`, role: 'assistant', text: reply, attractions: turn.response.knowledge?.attractions ?? [], clarification: turn.response.knowledge?.clarification },
     )
-    if (turn.response.status !== 'unsupported') response.value = turn.response
+    if (turn.response.status === 'needs_clarification' || turn.response.status === 'complete') response.value = turn.response
     else if (response.value) response.value = { ...response.value, changed_fields: [] }
     revision.value = turn.revision
   }

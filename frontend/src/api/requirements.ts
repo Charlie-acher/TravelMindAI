@@ -1,4 +1,6 @@
 /** 对话HTTP契约与请求封装；只访问自己的后端，不在前端保存DeepSeek密钥。 */
+import type { AnswerResult } from './documents'
+import { readResponse } from './http'
 export interface TravelRequirement {
   intent: string
   destination: string | null
@@ -28,25 +30,10 @@ export interface ChatResponse {
     message_intent: string | null
   }
   reply: string
-  status: 'needs_clarification' | 'complete' | 'unsupported'
+  status: 'needs_clarification' | 'complete' | 'unsupported' | 'knowledge'
   changed_fields: string[]
   request_id: string
-}
-
-/** 保留HTTP状态，页面遇到409时可以先恢复历史，而不是盲目重复提交旧版本。 */
-export class ApiError extends Error {
-  constructor(message: string, public status: number) { super(message) }
-}
-
-/** 读取HTTP响应；后端失败时只显示统一错误消息，不把整份响应拼进页面。 */
-async function readResponse<T>(response: Response): Promise<T> {
-  const body = await response.json().catch(() => null)
-  if (!response.ok) {
-    const message = body?.error?.message || `服务请求失败（HTTP ${response.status}）`
-    throw new ApiError(message, response.status)
-  }
-  if (body === null) throw new Error('服务返回了无法读取的数据，请重试。')
-  return body as T
+  knowledge?: AnswerResult | null // 历史响应可没有；新主聊天保存回答与引用原文快照。
 }
 
 /** 查询配置状态只读取后端配置标志，不向DeepSeek发送收费请求。 */
@@ -81,8 +68,8 @@ export async function sendRequirement(
   pending: PendingMessage,
 ): Promise<SavedTurn> {
   const controller = new AbortController()
-  // 给首次抽取和一次修复留出时间；浏览器等待超过90秒时停止等待并提示。
-  const timeout = window.setTimeout(() => controller.abort(), 90_000)
+  // 给需求抽取、检索和资料回答留出时间；超时后沿用原消息编号查是否已保存。
+  const timeout = window.setTimeout(() => controller.abort(), 180_000)
   try {
     return await readResponse(await fetch(`/api/v1/sessions/${encodeURIComponent(sessionId)}/requirement-messages`, {
       method: 'POST',

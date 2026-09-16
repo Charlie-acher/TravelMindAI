@@ -7,10 +7,10 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import Engine, event
 
-from app.schemas.requirement import TravelRequestExtraction
-from app.schemas.requirement_chat import RequirementChatResponse
-from app.services.requirement_history import HistoryConflictError, RequirementHistoryService
-from app.services.requirement_service import build_result
+from app.schemas.requirement.base import TravelRequestExtraction
+from app.schemas.requirement.chat import RequirementChatResponse
+from app.services.requirement.extract import build_result
+from app.services.requirement.history import HistoryConflictError, RequirementHistoryService
 from app.services.trip_service import SessionNotFoundError, TripService
 
 """创建有效但不完整的需求，用于证明保存不依赖必需字段全部填满。"""

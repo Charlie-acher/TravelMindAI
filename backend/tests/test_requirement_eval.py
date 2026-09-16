@@ -7,8 +7,8 @@ from pathlib import Path
 import pytest
 
 from scripts.requirement_eval import EvalCase, EvalTurn, evaluate_case, load_dataset, summarize
-from tests.test_requirement import FakeModel
-from tests.test_requirement_api import answer
+from tests.helpers import RecordingModel as FakeModel
+from tests.helpers import answer
 
 """期望值包含四个必要字段，null是明确标注的未知，不表示跳过评分。"""
 

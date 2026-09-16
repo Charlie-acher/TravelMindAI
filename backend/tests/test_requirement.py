@@ -10,8 +10,9 @@ from datetime import date
 import pytest
 from pydantic import ValidationError
 
-from app.schemas.requirement import TravelRequestExtraction
-from app.services.requirement_service import RequirementExtractionError, extract_requirements
+from app.schemas.requirement.base import TravelRequestExtraction
+from app.services.requirement.extract import RequirementExtractionError, extract_requirements
+from tests.helpers import RecordingModel as FakeModel
 
 """提供一份完整模型输出；每个测试拿到新字典，修改不会影响其他测试。"""
 
@@ -34,22 +35,6 @@ def complete_payload() -> dict[str, object]:
         "excluded_items": [],
         "assumptions": [],
     }
-
-
-class FakeModel:
-    """按顺序交出预设答案，并记下收到的消息，方便检查修复次数及提示内容。"""
-
-    """answers 是模型将返回的 JSON 文本；不需要配置密钥。"""
-
-    def __init__(self, answers: list[str]) -> None:
-        self.answers = iter(answers)
-        self.calls: list[list[dict[str, str]]] = []
-
-    """复制消息快照，避免服务后续追加消息时改变先前的调用记录。"""
-
-    def generate_json(self, messages: list[dict[str, str]]) -> str:
-        self.calls.append([message.copy() for message in messages])
-        return next(self.answers)
 
 
 """完整输入无需追问；钱在 JSON 中仍是字符串，原消息和参考日期可追溯。"""

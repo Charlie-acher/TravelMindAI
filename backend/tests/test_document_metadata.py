@@ -1,0 +1,176 @@
+"""测试层：验证元数据保存、归属隔离以及向量检索前的候选过滤。"""
+
+import json
+from io import BytesIO
+from pathlib import Path
+from types import SimpleNamespace
+from uuid import uuid4
+
+import httpx
+import pytest
+from fastapi import HTTPException
+from pydantic import ValidationError
+from sqlalchemy import Engine, insert, update
+
+from app.models.document import DocumentRecord
+from app.schemas.document.base import DocumentMetadata
+from app.schemas.document.search import SearchRequest
+from app.services.document.search import DocumentSearchService
+from app.services.document.service import DocumentService
+from app.services.document.vector_store import MilvusStore
+
+"""字段校验测试函数：拒绝越权字段、非法审核状态和超长值，空白保存为空。"""
+
+def test_metadata_validation() -> None:
+    for body in ({"owner_id": "other"}, {"review_status": "anything"}, {"city": "市" * 101}):
+        with pytest.raises(ValidationError):
+            DocumentMetadata.model_validate(body)
+    assert DocumentMetadata(city="  ").city is None
+    assert SearchRequest(query="西湖", city=" 杭州 ").city == "杭州"
+
+
+"""保存隔离测试函数：更新只改显式字段，列表精确筛选，停用及其他归属不能更新。"""
+
+def test_metadata_update_and_owner(store_engine: Engine, tmp_path: Path) -> None:
+    service = DocumentService(store_engine, tmp_path, "owner-a")
+    document = service.upload(BytesIO("西湖".encode()), "a.txt", "text/plain").document
+    assert document.city is None and document.review_status == "pending"
+    service.update_metadata(document.id, DocumentMetadata(city="杭州", source='a" or true',
+                                                         review_status="approved", poi_id="B001"))
+    changed = service.update_metadata(document.id, DocumentMetadata(city="绍兴"))
+    assert changed.city == "绍兴" and changed.poi_id == "B001"
+    assert len(service.list(metadata=DocumentMetadata(source='a" or true'))) == 1
+    assert service.list(metadata=DocumentMetadata(city="杭州")) == []
+    other = DocumentService(store_engine, tmp_path, "owner-b")
+    assert other.list(metadata=DocumentMetadata(city="绍兴")) == []
+    with pytest.raises(HTTPException) as denied:
+        other.update_metadata(document.id, DocumentMetadata(city="宁波"))
+    assert denied.value.status_code == 404
+    service.update_metadata(document.id, DocumentMetadata(poi_id=None))
+    assert service.read(document.id).poi_id is None
+    with store_engine.begin() as connection:
+        connection.execute(update(DocumentRecord).where(DocumentRecord.id == document.id)
+                           .values(status="deleting", error_message="待清理"))
+    with pytest.raises(HTTPException) as stopped:
+        service.update_metadata(document.id, DocumentMetadata(city="宁波"))
+    assert stopped.value.status_code == 409
+
+
+"""候选过滤测试函数：前201段均不符条件时仍能找到后面的目标，且不传元数据字符串。"""
+
+def test_metadata_filters_before_vector_top_k(store_engine: Engine, tmp_path: Path) -> None:
+    documents = DocumentService(store_engine, tmp_path, "owner-a")
+    noise = documents.upload(BytesIO(("无关\n\n" * 201).encode()), "noise.txt", "text/plain")
+    target = documents.upload(BytesIO("西湖目标".encode()), "target.txt", "text/plain")
+    noise_chunks = documents.generate_chunks(noise.document.id)
+    target_chunk = documents.generate_chunks(target.document.id).items[0]
+    documents.update_metadata(target.document.id, DocumentMetadata(city='杭州" or true',
+                                                                  review_status="approved"))
+    calls = []
+
+    """替代检索函数：模拟无关候选排在前面，只有向量前置过滤才能拿到目标。"""
+    def search(owner, vector, limit, document_id=None, *, document_ids=None):
+        calls.append(document_ids)
+        candidates = [(item, .99) for item in noise_chunks.items] * 5 + [(target_chunk, .8)]
+        return [(item.id, score) for item, score in candidates
+                if document_ids is None or item.document_id in document_ids][:limit]
+
+    vectors = SimpleNamespace(exists=lambda: True, search=search)
+    model = SimpleNamespace(embed=lambda _: SimpleNamespace(vectors=[[1., 0.]]))
+    service = DocumentSearchService(store_engine, vectors, model, "owner-a")
+    result = service.search("西湖", 5, metadata=DocumentMetadata(city='杭州" or true',
+                                                             review_status="approved"))
+    assert [hit.chunk.id for hit in result.items] == [target_chunk.id]
+    assert calls and all(ids == [target.document.id] for ids in calls)
+    calls.clear()
+    assert service.search("西湖", 5, metadata=DocumentMetadata(city="不存在")).items == []
+    assert calls == []
+    with store_engine.begin() as connection:
+        connection.execute(update(DocumentRecord).where(DocumentRecord.id == target.document.id)
+                           .values(status="deleting", error_message="待清理"))
+    assert service.search("西湖", 5, metadata=DocumentMetadata(city='杭州" or true')).items == []
+    assert calls == []
+
+
+"""HTTP合同测试函数：列表和搜索校验标签，PATCH不能更改归属或正文。"""
+
+def test_metadata_http_contract(store_engine: Engine, tmp_path: Path) -> None:
+    from fastapi.testclient import TestClient
+
+    from app.api.document.routes import get_document_service
+    from app.config import Settings
+    from app.main import create_app
+
+    documents = DocumentService(store_engine, tmp_path, "owner-a")
+    saved = documents.upload(BytesIO("绍兴".encode()), "test.txt", "text/plain").document
+    app = create_app(Settings(database_url=None))
+    app.dependency_overrides[get_document_service] = lambda: documents
+    with TestClient(app) as client:
+        path = f"/api/v1/documents/{saved.id}/metadata"
+        assert client.patch(path, json={"city": "绍兴", "poi_id": "B001"}).status_code == 200
+        assert len(client.get("/api/v1/documents", params={"city": "绍兴"}).json()) == 1
+        assert client.get("/api/v1/documents", params={"city": "杭州"}).json() == []
+        for body in ({"owner_id": "owner-b"}, {"review_status": "wrong"}, {"city": "a" * 101}):
+            assert client.patch(path, json=body).status_code == 422
+        assert client.get("/api/v1/documents", params={"review_status": "wrong"}).status_code == 422
+        assert client.patch(path, json={"city": " "}).json()["city"] is None
+
+
+"""向量表达式测试函数：JSON转义归属和值，空候选不发请求，沿用已有集合。"""
+
+def test_vector_document_filter_is_escaped() -> None:
+    from app.config import Settings
+
+    identifier = uuid4()
+    payloads = []
+
+    """检索响应函数：只记录实际提交的过滤条件，不连接真实向量库。"""
+    def respond(request: httpx.Request) -> httpx.Response:
+        payloads.append(json.loads(request.content))
+        return httpx.Response(200, json={"code": 0, "data": []})
+
+    settings = Settings(milvus_url="http://localhost:19530", embedding_provider="test",
+                        embedding_base_url="https://example.com/v1", embedding_model="test",
+                        embedding_dimensions=2, embedding_version="metadata-test")
+    with httpx.Client(transport=httpx.MockTransport(respond)) as http:
+        vectors = MilvusStore(settings, http)
+        owner = 'owner" or true or owner_id == "'
+        assert vectors.search(owner, [1., 0.], 5, document_ids=[]) == []
+        assert payloads == []
+        vectors.search(owner, [1., 0.], 5, document_ids=[identifier])
+        assert payloads[0]["filter"] == (
+            "owner_id == " + json.dumps(owner) + " and document_id in "
+            + json.dumps([str(identifier)])
+        )
+
+
+"""大集合测试函数：超过500份资料时分批限定候选，按全局分数合并而不漏掉最后一批。"""
+
+def test_candidate_document_batches_keep_global_ranking(store_engine: Engine, tmp_path: Path):
+    ids = [uuid4() for _ in range(501)]
+    with store_engine.begin() as connection:
+        connection.execute(insert(DocumentRecord), [{
+            "id": identifier, "owner_id": "owner-a", "file_name": "a.txt",
+            "storage_name": f"{identifier.hex}.txt", "mime_type": "text/plain",
+            "content_hash": identifier.hex.ljust(64, "0"), "size_bytes": 1,
+            "status": "parsed", "error_message": None,
+            "sections_json": [{"text": "正文", "order": 1}], "warnings_json": [],
+        } for identifier in ids])
+    documents = DocumentService(store_engine, tmp_path, "owner-a")
+    first = documents.generate_chunks(ids[0]).items[0]
+    last = documents.generate_chunks(ids[-1]).items[0]
+    batches = []
+
+    """分批响应函数：最后一批包含最高分，要求服务合并而非直接返回第一批。"""
+    def search(owner, vector, limit, document_id=None, *, document_ids=None):
+        batches.append(document_ids)
+        return [(chunk.id, score) for chunk, score in ((last, .9), (first, .5))
+                if chunk.document_id in document_ids][:limit]
+
+    service = DocumentSearchService(
+        store_engine, SimpleNamespace(exists=lambda: True, search=search),
+        SimpleNamespace(embed=lambda _: SimpleNamespace(vectors=[[1., 0.]])), "owner-a",
+    )
+    assert service.search("正文", 1).items[0].chunk.id == last.id
+    assert sorted(len(batch) for batch in batches) == [1, 500]
+    assert set(identifier for batch in batches for identifier in batch) == set(ids)

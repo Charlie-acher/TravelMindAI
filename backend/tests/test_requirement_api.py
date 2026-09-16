@@ -4,51 +4,15 @@
 这一步采用前端携带上一轮需求，不写数据库或创建服务端全局会话。
 """
 
-import json
 
 import pytest
 from fastapi.testclient import TestClient
 
-from app.api.requirements import get_requirement_model
+from app.api.requirement.routes import get_requirement_model
 from app.config import Settings
 from app.llm.client import ModelClientError
 from app.main import create_app
-
-"""构造模型输出，null表示这轮未提到；kwargs按用例覆盖字段。"""
-
-def answer(**changes: object) -> dict[str, object]:
-    return {
-        "intent": "plan_trip",
-        "destination": None,
-        "origin": None,
-        "start_date": None,
-        "end_date": None,
-        "days": None,
-        "travelers": None,
-        "total_budget": None,
-        "pace": None,
-        "interests": [],
-        "dietary": [],
-        "lodging_preferences": [],
-        "hard_constraints": [],
-        "excluded_items": [],
-        "assumptions": [],
-    } | changes
-
-
-class FakeModel:
-    """顺序交出预设答案，用一次测试模拟同一用户的多轮对话。"""
-
-    """保存答案迭代器，不连接任何远程服务。"""
-
-    def __init__(self, answers: list[dict[str, object]]) -> None:
-        self.answers = iter(answers)
-
-    """参数与正式模型相同，因此可以通过依赖覆盖注入路由。"""
-
-    def generate_json(self, messages: list[dict[str, str]]) -> str:
-        return json.dumps(next(self.answers))
-
+from tests.helpers import FakeModel, answer
 
 """先说城市再补充人数预算，响应给出回复、需求、状态、变化字段和请求编号。"""
 

@@ -9,9 +9,9 @@ from datetime import date
 import pytest
 from pydantic import ValidationError
 
-from app.schemas.requirement import TravelRequestExtraction
-from app.schemas.requirement_update import RequirementUpdate
-from app.services.requirement_merge import merge_requirements
+from app.schemas.requirement.base import TravelRequestExtraction
+from app.schemas.requirement.update import RequirementUpdate
+from app.services.requirement.merge import merge_requirements
 
 """创建一份部分修改；没提到的标量用None、列表用[]，表示保持原样。"""
 

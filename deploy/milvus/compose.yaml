@@ -1,0 +1,27 @@
+# 部署层：在Docker Desktop中启动本地单机Milvus，供后端保存和搜索向量。
+# 参考官方standalone_embed.sh的内嵌etcd与本地存储配置，版本固定便于复现。
+services:
+  milvus:
+    image: milvusdb/milvus:v2.6.17
+    container_name: travelmind-milvus
+    command: ["milvus", "run", "standalone"]
+    environment:
+      ETCD_USE_EMBED: "true"
+      ETCD_DATA_DIR: /var/lib/milvus/etcd
+      ETCD_CONFIG_PATH: /milvus/configs/embedEtcd.yaml
+      COMMON_STORAGETYPE: local
+      DEPLOY_MODE: STANDALONE
+    ports:
+      - "127.0.0.1:19530:19530" # 仅本机后端可以访问，不向局域网开放。
+      - "127.0.0.1:9091:9091" # 本机健康检查。
+    volumes:
+      - milvus-data:/var/lib/milvus # Docker命名卷保留向量和元数据，重启容器不丢失。
+      - ./embedEtcd.yaml:/milvus/configs/embedEtcd.yaml:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 90s
+volumes:
+  milvus-data: # 不执行down -v，避免删除已经建立的索引。

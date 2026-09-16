@@ -18,7 +18,7 @@ from pydantic import ValidationError
 
 from app.config import load_settings
 from app.llm.client import DeepSeekClient, ModelClientError
-from app.services.requirement_prompt import build_requirement_prompt
+from app.services.requirement.prompt import build_requirement_prompt
 from scripts.requirement_eval import evaluate_case, load_dataset, summarize
 
 """生成方便人阅读的成绩单；完整逐字段答案仍在旁边的JSON里供复查。"""

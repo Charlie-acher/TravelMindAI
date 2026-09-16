@@ -37,7 +37,7 @@ def test_budget_only_mode_reports_storage_disabled() -> None:
         assert response.json()["request_id"] == response.headers["X-Request-ID"]
         ready = client.get("/api/v1/health/ready")
         assert ready.status_code == 200
-        assert ready.json()["dependencies"] == {"postgresql": "disabled"}
+        assert ready.json()["dependencies"] == {"postgresql": "disabled", "milvus": "disabled"}
         assert (
             client.post(
                 "/api/v1/budget/estimate",
@@ -105,7 +105,7 @@ def test_http_save_versions_and_restore_in_new_app(configured_settings: Settings
         assert restarted.get(f"/api/v1/sessions/{session_id}").json()["session"]["id"] == session_id
         ready = restarted.get("/api/v1/health/ready")
         assert ready.status_code == 200
-        assert ready.json()["dependencies"] == {"postgresql": "ready"}
+        assert ready.json()["dependencies"] == {"postgresql": "ready", "milvus": "disabled"}
 
 
 """入口拒绝客户端预算结果、非法天数和错误日期，且不写入草稿。"""

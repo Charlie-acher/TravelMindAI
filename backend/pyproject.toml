@@ -19,6 +19,9 @@ dependencies = [
     "httpx>=0.28,<1", # 管理底层连接的生命周期，也供离线测试替换网络。
     "langchain-openai>=1.6.2,<2", # 提供ChatOpenAI，通过base_url连接DeepSeek兼容接口。
     "openai>=2,<3", # LangChain底层SDK；代码直接使用其超时、连接和状态异常类型。
+    "python-multipart>=0.0.22,<1", # 解析浏览器FormData上传；实际文件内容仍由业务层检查。
+    "pypdf>=6.18.1,<7", # 读取有文字层的PDF，并保留从1开始的物理页码。
+    "python-docx>=1.2,<2", # 按正文顺序读取DOCX段落和表格，不需要安装Word。
 ]
 
 # 开发工具只用于开发/测试，未来部署时可以用 uv sync --no-dev 排除。

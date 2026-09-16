@@ -9,8 +9,8 @@ from typing import Any, Self
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.llm.client import ModelClientError
-from app.schemas.requirement import Intent, TravelRequestExtraction
-from app.services.requirement_service import (
+from app.schemas.requirement.base import Intent, TravelRequestExtraction
+from app.services.requirement.extract import (
     ModelClient,
     RequirementExtractionError,
     extract_requirements,

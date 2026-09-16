@@ -1,10 +1,22 @@
 <script setup lang="ts">
-/** M2简易对话页：负责当前页面的聊天状态和交互，后端负责抽取、合并和校验。 */
+/** 页面组合层：展示旅行对话与需求卡片，后端负责知识库检索和回答校验。 */
 import { onMounted, ref } from 'vue'
-import { Alert as AAlert, Button as AButton, Card as ACard, Tag as ATag, Textarea as ATextarea } from '@arco-design/web-vue'
+import { Alert as AAlert, Button as AButton, Card as ACard, Textarea as ATextarea } from '@arco-design/web-vue'
 import { getModelStatus } from './api/requirements'
 import { useRequirementConversation } from './useRequirementConversation'
 import RequirementPanel from './components/RequirementPanel.vue'
+import DocumentPanel from './components/DocumentPanel.vue'
+import AttractionCards from './components/AttractionCards.vue'
+
+// v-show保留已经创建的页面；切换资料页不会销毁对话，资料页则在首次打开时才加载。
+const activePage = ref<'chat' | 'documents'>('chat')
+const documentsOpened = ref(false)
+
+/** 资料入口独立于模型配置，即使没有DeepSeek密钥也能上传和阅读。 */
+function openDocuments(): void {
+  documentsOpened.value = true
+  activePage.value = 'documents'
+}
 
 // 会话管理负责保存/恢复，页面只处理输入法、模型提示和组件显示。
 const { messages, input, response, sessionId, revision, busy, restoring, restoreFailed,
@@ -12,7 +24,7 @@ const { messages, input, response, sessionId, revision, busy, restoring, restore
   send: sendConversation, resetConversation } = useRequirementConversation()
 const modelState = ref<'checking' | 'configured' | 'missing' | 'offline'>('checking')
 const modelName = ref('DeepSeek')
-const examples = ['想去杭州', '三天，两个人，总预算五千元', '改成三个人', '取消不爬山的限制']
+const examples = ['想去杭州', '三天，两个人，总预算五千元', '杭州有哪些适合散步的景点？', '改成三个人']
 
 /** 查询配置标志，不调用模型；失败时提示检查后端，不伪装成“模型已连接”。 */
 async function checkModel(): Promise<void> {
@@ -47,11 +59,14 @@ onMounted(() => { void checkModel(); void initialize() })
   <div class="app-shell">
     <header class="page-header">
       <div class="brand"><span class="brand-mark">T</span><div><strong>TravelMindAI</strong><span>从一个想法，开始一段旅行</span></div></div>
-      <a-tag color="green">旅行需求对话</a-tag>
+      <nav aria-label="功能导航">
+        <a-button :type="activePage === 'chat' ? 'primary' : 'text'" @click="activePage = 'chat'">旅行对话</a-button>
+        <a-button :type="activePage === 'documents' ? 'primary' : 'text'" @click="openDocuments">旅行资料</a-button>
+      </nav>
     </header>
-    <main class="workspace">
+    <main v-show="activePage === 'chat'" class="workspace">
       <a-card class="chat-panel" :bordered="false">
-        <template #title><div class="chat-title">聊聊你的旅行<span>先说需求，随时调整</span></div></template>
+        <template #title><div class="chat-title">聊聊你的旅行<span>说说你的想法，随时调整</span></div></template>
         <template #extra><a-button :disabled="busy" @click="reloadConversation">重新读取</a-button><a-button :disabled="busy" @click="resetConversation">重新开始</a-button></template>
         <div class="model-strip">
           <span class="status-dot" :class="modelState" />
@@ -65,11 +80,15 @@ onMounted(() => { void checkModel(); void initialize() })
           <div v-for="message in messages" :key="message.id" class="message-row" :class="message.role">
             <span class="message-avatar">{{ message.role === 'assistant' ? 'T' : '我' }}</span>
             <div class="message-content"><span class="message-name">{{ message.role === 'assistant' ? '旅行助手' : '你' }}</span>
-              <div class="message-bubble">{{ message.text }}</div>
+              <!-- 景点回答只展示卡片，避免同一介绍重复出现；普通对话仍显示文字。 -->
+              <AttractionCards v-if="message.role === 'assistant' && message.attractions?.length" :items="message.attractions" />
+              <div v-else class="message-bubble">{{ message.text }}</div>
+              <!-- 追问单独显示，不能被“有卡片就隐藏总述”的规则一起隐藏。 -->
+              <div v-if="message.attractions?.length && message.clarification" class="message-bubble">{{ message.clarification }}</div>
               <span v-if="message.failed" class="failed-note">本条未确认保存，可重试或重新读取</span>
             </div>
           </div>
-          <div v-if="busy" class="thinking" role="status"><span class="thinking-dot" />{{ restoring ? '正在恢复已保存的对话…' : '正在理解、检查并保存你的需求…' }}</div>
+          <div v-if="busy" class="thinking" role="status"><span class="thinking-dot" />{{ restoring ? '正在恢复已保存的对话…' : '正在理解需求、检索资料并保存回答…' }}</div>
         </div>
         <div class="composer">
           <a-alert v-if="storageWarning" type="warning" class="send-error">{{ storageWarning }}</a-alert>
@@ -84,7 +103,10 @@ onMounted(() => { void checkModel(); void initialize() })
           <div class="composer-footer"><span>Enter 发送 · Shift + Enter 换行</span><a-button type="primary" :loading="busy" :disabled="busy || restoreFailed || !input.trim() || modelState !== 'configured'" @click="send">发送</a-button></div>
         </div>
       </a-card>
-      <aside class="detail-column"><RequirementPanel :response="response" /><p class="session-notice"><template v-if="sessionId">当前会话已保存 {{ revision }} 轮，刷新本标签页可恢复。<br /></template><template v-else>发送后自动保存，刷新本标签页可继续。<br /></template>当前支持 2～5 天、1～8 人的单目的地旅行。<br />本阶段整理旅行需求，尚未生成每日行程。</p></aside>
+      <aside class="detail-column"><RequirementPanel :response="response" /><p class="session-notice"><template v-if="sessionId">当前会话已保存 {{ revision }} 轮，刷新本标签页可恢复。<br /></template><template v-else>发送后自动保存，刷新本标签页可继续。<br /></template>需求收集支持 2～5 天、1～8 人的单目的地旅行。<br />结合旅行资料与已启用的查询工具回答，尚未生成每日行程。</p></aside>
+    </main>
+    <main v-if="documentsOpened" v-show="activePage === 'documents'">
+      <DocumentPanel :active="activePage === 'documents'" />
     </main>
   </div>
 </template>

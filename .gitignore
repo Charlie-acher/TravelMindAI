@@ -30,8 +30,9 @@ build/
 
 # 未来模块的运行数据可能包含上传文档和聊天内容，不能进入版本库。
 # data/fixtures 和 data/evals 没有被忽略，便于提交脱敏的测试材料。
-data/uploads/
-data/runtime/
+# **同时覆盖项目根目录和backend下的实际资料目录。
+**/data/uploads/
+**/data/runtime/
 data/milvus/
 data/postgres/
 data/checkpoints/
