@@ -4,12 +4,14 @@
 """
 
 from decimal import Decimal, InvalidOperation
+from math import asin, cos, radians, sin, sqrt
 from typing import Any
 
 import httpx
 from pydantic import ValidationError
 
 from app.config import Settings
+from app.schemas.dining import DiningItem, DiningResult
 from app.schemas.document.answer import GeoPoint, MapLookup
 
 # 限定区划的已核对名称变体；不做全局模糊匹配。
@@ -59,6 +61,109 @@ class AmapClient:
     def __init__(self, settings: Settings, http: httpx.Client) -> None:
         self.key = settings.amap_api_key
         self.http = http
+
+    """附近餐饮查询函数：按真实锚点检索两公里圆形区域，只接收四分及以上原始评分。"""
+
+    def nearby_dining(self, anchor: MapLookup, preference: str | None = None,
+                      radius_m: int = 2000) -> DiningResult:
+        result = DiningResult(status="unconfigured", anchor=anchor, preference=preference,
+                              radius_m=radius_m)
+        center = anchor.location
+        if anchor.status != "found" or center is None:
+            return result.model_copy(update={"status": "needs_clarification",
+                                             "clarification": "请先明确要查询的景点或具体地点。"})
+        if self.key is None or not self.key.get_secret_value().strip():
+            return result
+        try:
+            params: dict[str, str | int] = {
+                "key": self.key.get_secret_value(), "types": "050000",
+                "location": f"{center.longitude:.6f},{center.latitude:.6f}",
+                "radius": radius_m, "show_fields": "business", "sortrule": "distance",
+                "region": anchor.city, "city_limit": "true", "page_size": 25, "page_num": 1,
+            }
+            if preference and preference != "不限":
+                params["keywords"] = preference
+            response = self.http.get("https://restapi.amap.com/v5/place/around",
+                                     params=params, timeout=5)
+            response.raise_for_status()
+            body = response.json()
+            if (not isinstance(body, dict) or body.get("status") != "1"
+                    or not isinstance(body.get("pois"), list)):
+                return result.model_copy(update={"status": "error"})
+            items: list[DiningItem] = []
+            missing = 0
+            known_ratings = 0
+            seen: set[str] = set()
+            for poi in body["pois"]:
+                if not isinstance(poi, dict):
+                    continue
+                point = read_coordinate(poi.get("location"))
+                # 附近搜索仍核对所属城市和坐标，防止错误响应带入异地同名餐厅。
+                if (point is None or poi.get("cityname") not in (anchor.city, f"{anchor.city}市")
+                        and poi.get("adname") != anchor.city
+                        or not isinstance(poi.get("typecode"), str)
+                        or not poi["typecode"].startswith("05")):
+                    continue
+                lat1, lat2 = radians(center.latitude), radians(point.latitude)
+                haversine = (sin((lat2 - lat1) / 2) ** 2 + cos(lat1) * cos(lat2)
+                             * sin(radians(point.longitude - center.longitude) / 2) ** 2)
+                if 6371000 * 2 * asin(sqrt(min(1, haversine))) > radius_m:
+                    continue
+                if (not isinstance(poi.get("id"), str) or not poi["id"]
+                        or poi["id"] in seen or not isinstance(poi.get("name"), str)
+                        or not poi["name"].strip()):
+                    continue
+                seen.add(poi["id"])
+                business = poi.get("business")
+                business = business if isinstance(business, dict) else {}
+                # 关键词召回不等于口味已核实；名称、分类或商业标签至少一项须直接支持。
+                if preference and preference != "不限" and not any(
+                    isinstance(value, str) and preference in value
+                    for value in (poi["name"], poi.get("type"), business.get("keytag"))
+                ):
+                    continue
+                rating = business.get("rating")
+                try:
+                    score = Decimal(rating) if isinstance(rating, str) else Decimal("NaN")
+                except InvalidOperation:
+                    score = Decimal("NaN")
+                if not score.is_finite() or not 0 <= score <= 5:
+                    missing += 1
+                    continue
+                known_ratings += 1
+                if score < 4:
+                    continue
+                distance = None
+                cost = None
+                # 距离和消费没有有效值时留空，不用推算值冒充地图返回值。
+                for field, raw in (("distance", poi.get("distance")),
+                                   ("cost", business.get("cost"))):
+                    if not isinstance(raw, str) or not raw.strip():
+                        continue
+                    try:
+                        number = Decimal(raw)
+                        if number.is_finite() and number >= 0:
+                            if field == "distance":
+                                distance = float(number)
+                            else:
+                                cost = raw
+                    except InvalidOperation:
+                        pass
+                if distance is not None and distance > radius_m:
+                    continue
+                items.append(DiningItem(poi_id=poi["id"], name=poi["name"],
+                                        address=full_address(poi), location=point,
+                                        rating=float(score), distance_m=distance,
+                                        reference_cost=cost))
+            items.sort(key=lambda item: (-item.rating, item.distance_m
+                                         if item.distance_m is not None else float("inf")))
+            return result.model_copy(update={
+                "status": "found" if items else (
+                    "ratings_unavailable" if missing and not known_ratings else "empty"),
+                "items": items[:5], "rating_missing_count": missing,
+            })
+        except (httpx.HTTPError, ValueError):
+            return result.model_copy(update={"status": "error"})
 
     """区划查询函数：从高德读取真实区划，失败时交由查询函数返回错误。"""
 

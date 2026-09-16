@@ -2,11 +2,13 @@
 HTTP 接口层：提供旅行会话和草稿的创建、保存与查询接口。
 """
 
+from datetime import datetime
 from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
+from app.api.auth import CurrentUser, require_session_owner
 from app.schemas.budget import BudgetSummary
 from app.schemas.common import ErrorResponse
 from app.schemas.trip import (
@@ -14,6 +16,7 @@ from app.schemas.trip import (
     DraftResponse,
     DraftView,
     SessionCreate,
+    SessionPage,
     SessionResponse,
     SessionView,
 )
@@ -44,9 +47,9 @@ TripServiceDependency = Annotated[TripService, Depends(get_trip_service)]
 
 @router.post("", response_model=SessionResponse, status_code=201, summary="创建旅行会话")
 def create_session(
-    body: SessionCreate, request: Request, service: TripServiceDependency
+    body: SessionCreate, request: Request, service: TripServiceDependency, user: CurrentUser,
 ) -> SessionResponse:
-    trip = service.create_session(body.title)
+    trip = service.create_session(body.title, user_id=user.id)
     return SessionResponse(
         session=SessionView.model_validate(trip), request_id=request.state.request_id
     )
@@ -54,7 +57,36 @@ def create_session(
 
 """会话查询接口函数：按编号返回旅行会话信息。"""
 
-@router.get("/{session_id}", response_model=SessionResponse, summary="读取旅行会话")
+@router.get("", response_model=SessionPage, summary="列出自己的历史会话")
+def list_sessions(
+    service: TripServiceDependency, user: CurrentUser,
+    limit: Annotated[int, Query(ge=1, le=100)] = 30,
+    cursor: Annotated[str | None, Query(max_length=100)] = None,
+) -> SessionPage:
+    position = None
+    if cursor is not None:
+        try:
+            timestamp, identifier = cursor.split("|", 1)
+            stamp = datetime.fromisoformat(timestamp)
+            if stamp.tzinfo is None:
+                raise ValueError()
+            position = (stamp, UUID(identifier))
+        except ValueError:
+            raise HTTPException(422, "历史分页游标无效，请重新加载") from None
+    rows = service.list_sessions(user.id, limit, position)
+    items = rows[:limit]
+    next_cursor = None
+    if len(rows) > limit:
+        last = items[-1]
+        next_cursor = f"{last.updated_at.isoformat()}|{last.id}"
+    return SessionPage(items=[SessionView.model_validate(row) for row in items],
+                       next_cursor=next_cursor)
+
+
+"""会话查询接口函数：按编号读取当前账号的会话。"""
+
+@router.get("/{session_id}", response_model=SessionResponse, summary="读取旅行会话",
+            dependencies=[Depends(require_session_owner)])
 def get_session(
     session_id: UUID, request: Request, service: TripServiceDependency
 ) -> SessionResponse:
@@ -76,6 +108,7 @@ def get_session(
     response_model=DraftResponse, # 指定响应结构
     status_code=201,
     summary="计算预算并保存草稿",
+    dependencies=[Depends(require_session_owner)],
 )
 def save_draft(
     session_id: UUID,  # 会话ID，用于标识特定的会话
@@ -111,15 +144,16 @@ def save_draft(
 @router.get(
     "/{session_id}/drafts",  # 路由路径，用于获取指定会话的草稿
     response_model=DraftResponse,  # 响应模型，定义返回数据的结构
-    summary="读取最新或历史草稿"  # 接口功能简述
+    summary="读取最新或历史草稿",  # 接口功能简述
+    dependencies=[Depends(require_session_owner)],
 )
 def get_draft(
     session_id: UUID,  # 会话ID，用于标识特定的会话
     request: Request,  # 请求对象，包含请求相关信息
     service: TripServiceDependency,  # 存储依赖，用于数据访问
-    version: Annotated[int | None, Query(ge=1, description="行程版本，省略时返回最新")] = None,  # 可选的版本参数，指定要获取的草稿版本
+    version: Annotated[int | None, Query(ge=1, description="行程版本，省略时返回最新")] = None,
 ) -> DraftResponse:
     saved = service.get_draft(session_id, version=version)  # 从存储中获取指定会话和版本的草稿
     if saved is None:  # 检查是否找到草稿
         raise HTTPException(404, "没有找到该会话的对应草稿版本")
-    return DraftResponse(draft=DraftView.model_validate(saved), request_id=request.state.request_id)  # 返回草稿数据和请求ID
+    return DraftResponse(draft=DraftView.model_validate(saved), request_id=request.state.request_id)

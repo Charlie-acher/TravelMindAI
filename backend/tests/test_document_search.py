@@ -19,9 +19,8 @@ from app.services.document.service import DocumentService
 
 
 def test_search_routes_report_missing_configuration() -> None:
-    from fastapi.testclient import TestClient
-
     from app.main import create_app
+    from tests.helpers import authenticated_client as TestClient
 
     with TestClient(create_app(Settings(database_url=None, milvus_url=None))) as client:
         assert client.post("/api/v1/document-search", json={"query": "西湖"}).status_code == 503
@@ -148,10 +147,9 @@ def test_index_resume_search_and_owner(
                 with pytest.raises(HTTPException) as conflict:
                     resumed.index_batch(saved.document.id)
                 assert conflict.value.status_code == 409
-            from fastapi.testclient import TestClient
-
             from app.api.document.search import get_search_service
             from app.main import create_app
+            from tests.helpers import authenticated_client as TestClient
 
             app = create_app(Settings(database_url=None))
             app.dependency_overrides[get_search_service] = lambda: resumed

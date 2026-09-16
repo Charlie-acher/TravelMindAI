@@ -1,4 +1,4 @@
-"""聊天业务层：每轮检索知识库，将有引用的回答与需求收集提示组合。
+"""聊天业务层：为非餐饮问题检索知识库，将有引用的回答与需求收集提示组合。
 
 主聊天接口调用本文件，检索服务负责归属检查，问答服务负责模型与引用校验。
 """
@@ -81,6 +81,16 @@ def ground_chat_response(
     web: WebSearchClient | None = None,
 ) -> RequirementChatResponse:
     message = response.result.original_message
+    planning = response.status in {"needs_clarification", "complete"}
+    knowledge_question = bool(re.search(
+        r"[?？]|哪些|哪里|介绍|推荐|景点|散步|门票|开放|预约|酒店|住宿|多少钱|有什么|怎么样|怎么去",
+        message,
+    ))
+    overview = bool(planning and destination and "destination" in response.changed_fields
+                    and not knowledge_question)
+    # 首次提及目的地即检索简介；继续登记个人条件时不把“无知识问题”当作回答失败。
+    query = (f"{destination}目的地简介：用一两句介绍整体旅行特色，不罗列景点卡片。"
+             if overview else message)
     # 上轮话题仅辅助“那里/还有呢”的理解，不把旧答案当作新事实证据。
     dates = response.result.extraction
     lodging_question = any(word in message for word in ("住宿", "酒店", "民宿", "旅馆", "青旅"))
@@ -102,8 +112,8 @@ def ground_chat_response(
     size = 800 - len(prefix) - len(suffix)
     hits: dict[str, SearchHit] = {}
     # 6000字主聊天保持兼容，分段查询覆盖末尾；每段复用原检索的归属核对。
-    for offset in range(0, len(message), size):
-        for hit in search.search(prefix + message[offset:offset + size] + suffix, 10).items:
+    for offset in range(0, len(query), size):
+        for hit in search.search(prefix + query[offset:offset + size] + suffix, 10).items:
             # 标题已随正文携带，无需单独占一个事实名额；资料管理页仍可查到标题。
             text = hit.chunk.text.strip()
             if "\n" not in text and text.lstrip("# ") in hit.chunk.section_path:
@@ -120,16 +130,15 @@ def ground_chat_response(
         knowledge = AnswerResult(status="insufficient", points=[], sources=[])
     else:
         knowledge = answer_from_sources(
-            message, evidence, model, conversation_context=context, maps=maps,
+            query, evidence, model, conversation_context=context, maps=maps, overview=overview,
             # 只登记个人条件时不外发搜索；知识提问和混合提问才补充网页证据。
-            web=web if topic or response.result.message_intent in {
+            web=web if overview or topic or response.result.message_intent in {
                 "travel_info", "trip_question",
             } or any(
                 word in message
                 for word in ("景点", "散步", "游览", "门票", "预约", "开放", "哪里", "介绍")
             ) else None,
         )
-    planning = response.status in {"needs_clarification", "complete"}
     unconfirmed = "这部分信息目前还无法确认，暂时不能给出可靠结论。"
     if any(item.status == "unconfigured" for item in knowledge.map_lookups):
         unconfirmed += "地图查询尚未启用，具体位置暂未核实。"
@@ -148,7 +157,11 @@ def ground_chat_response(
             reply += "\n\n" + response.reply
     elif planning:
         # 收集个人条件不依赖资料证明，但不能因此吞掉同一句中的知识问题。
-        reply = response.reply + "\n\n" + unconfirmed
+        reply = response.reply
+        if knowledge_question:
+            reply += "\n\n" + unconfirmed
+        elif overview:
+            reply = f"可以，我们来慢慢安排{destination}这趟旅行。\n\n" + reply
     else:
         reply = unconfirmed
     if knowledge.status == "answered" and knowledge.clarification:
@@ -156,7 +169,7 @@ def ground_chat_response(
     # 住宿证据不足时补问真正影响筛选的条件，不把模拟房价包装成可预订价格。
     if knowledge.status == "insufficient" and lodging_question and missing_stay:
         reply += "\n\n筛选住宿还需要" + "、".join(missing_stay) + "，请先补充这些条件。"
-    if knowledge.web_search.status in {"unconfigured", "error", "empty"}:
+    if not overview and knowledge.web_search.status in {"unconfigured", "error", "empty"}:
         notice = {"unconfigured": "联网补查尚未启用，门票等时效信息可能不完整。",
                   "error": "本次联网补查失败，门票等时效信息暂未核实。",
                   "empty": "本次未找到可用的官方网页补充，门票等时效信息暂未核实。"}

@@ -19,10 +19,11 @@ from app.services.document.search import DocumentSearchService
 from app.services.document.service import DocumentService
 from app.services.document.vector_store import MilvusStore
 
-"""字段校验测试函数：拒绝越权字段、非法审核状态和超长值，空白保存为空。"""
+"""字段校验测试函数：拒绝旧标签和非法类别，空白城市保存为空。"""
 
 def test_metadata_validation() -> None:
-    for body in ({"owner_id": "other"}, {"review_status": "anything"}, {"city": "市" * 101}):
+    for body in ({"owner_id": "other"}, {"review_status": "anything"},
+                 {"category": "交通"}, {"city": "城" * 101}):
         with pytest.raises(ValidationError):
             DocumentMetadata.model_validate(body)
     assert DocumentMetadata(city="  ").city is None
@@ -34,20 +35,19 @@ def test_metadata_validation() -> None:
 def test_metadata_update_and_owner(store_engine: Engine, tmp_path: Path) -> None:
     service = DocumentService(store_engine, tmp_path, "owner-a")
     document = service.upload(BytesIO("西湖".encode()), "a.txt", "text/plain").document
-    assert document.city is None and document.review_status == "pending"
-    service.update_metadata(document.id, DocumentMetadata(city="杭州", source='a" or true',
-                                                         review_status="approved", poi_id="B001"))
+    assert document.city is None and document.category is None
+    service.update_metadata(document.id, DocumentMetadata(city="杭州", category="景点"))
     changed = service.update_metadata(document.id, DocumentMetadata(city="绍兴"))
-    assert changed.city == "绍兴" and changed.poi_id == "B001"
-    assert len(service.list(metadata=DocumentMetadata(source='a" or true'))) == 1
+    assert changed.city == "绍兴" and changed.category == "景点"
+    assert len(service.list(metadata=DocumentMetadata(category="景点"))) == 1
     assert service.list(metadata=DocumentMetadata(city="杭州")) == []
     other = DocumentService(store_engine, tmp_path, "owner-b")
     assert other.list(metadata=DocumentMetadata(city="绍兴")) == []
     with pytest.raises(HTTPException) as denied:
         other.update_metadata(document.id, DocumentMetadata(city="宁波"))
     assert denied.value.status_code == 404
-    service.update_metadata(document.id, DocumentMetadata(poi_id=None))
-    assert service.read(document.id).poi_id is None
+    service.update_metadata(document.id, DocumentMetadata(category=None))
+    assert service.read(document.id).category is None
     with store_engine.begin() as connection:
         connection.execute(update(DocumentRecord).where(DocumentRecord.id == document.id)
                            .values(status="deleting", error_message="待清理"))
@@ -65,7 +65,7 @@ def test_metadata_filters_before_vector_top_k(store_engine: Engine, tmp_path: Pa
     noise_chunks = documents.generate_chunks(noise.document.id)
     target_chunk = documents.generate_chunks(target.document.id).items[0]
     documents.update_metadata(target.document.id, DocumentMetadata(city='杭州" or true',
-                                                                  review_status="approved"))
+                                                                  category="景点"))
     calls = []
 
     """替代检索函数：模拟无关候选排在前面，只有向量前置过滤才能拿到目标。"""
@@ -79,7 +79,7 @@ def test_metadata_filters_before_vector_top_k(store_engine: Engine, tmp_path: Pa
     model = SimpleNamespace(embed=lambda _: SimpleNamespace(vectors=[[1., 0.]]))
     service = DocumentSearchService(store_engine, vectors, model, "owner-a")
     result = service.search("西湖", 5, metadata=DocumentMetadata(city='杭州" or true',
-                                                             review_status="approved"))
+                                                             category="景点"))
     assert [hit.chunk.id for hit in result.items] == [target_chunk.id]
     assert calls and all(ids == [target.document.id] for ids in calls)
     calls.clear()
@@ -95,11 +95,10 @@ def test_metadata_filters_before_vector_top_k(store_engine: Engine, tmp_path: Pa
 """HTTP合同测试函数：列表和搜索校验标签，PATCH不能更改归属或正文。"""
 
 def test_metadata_http_contract(store_engine: Engine, tmp_path: Path) -> None:
-    from fastapi.testclient import TestClient
-
     from app.api.document.routes import get_document_service
     from app.config import Settings
     from app.main import create_app
+    from tests.helpers import authenticated_client as TestClient
 
     documents = DocumentService(store_engine, tmp_path, "owner-a")
     saved = documents.upload(BytesIO("绍兴".encode()), "test.txt", "text/plain").document
@@ -107,12 +106,12 @@ def test_metadata_http_contract(store_engine: Engine, tmp_path: Path) -> None:
     app.dependency_overrides[get_document_service] = lambda: documents
     with TestClient(app) as client:
         path = f"/api/v1/documents/{saved.id}/metadata"
-        assert client.patch(path, json={"city": "绍兴", "poi_id": "B001"}).status_code == 200
+        assert client.patch(path, json={"city": "绍兴", "category": "景点"}).status_code == 200
         assert len(client.get("/api/v1/documents", params={"city": "绍兴"}).json()) == 1
         assert client.get("/api/v1/documents", params={"city": "杭州"}).json() == []
         for body in ({"owner_id": "owner-b"}, {"review_status": "wrong"}, {"city": "a" * 101}):
             assert client.patch(path, json=body).status_code == 422
-        assert client.get("/api/v1/documents", params={"review_status": "wrong"}).status_code == 422
+        assert client.get("/api/v1/documents", params={"category": "wrong"}).status_code == 422
         assert client.patch(path, json={"city": " "}).json()["city"] is None
 
 

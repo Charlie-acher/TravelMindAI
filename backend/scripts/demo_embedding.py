@@ -46,7 +46,7 @@ def main(argv: list[str] | None = None) -> int:
         chunk_ids: list[str] = []
         if arguments.document_id is not None:
             engine = create_database_engine(settings)
-            service = DocumentService(engine, settings.document_upload_dir, "local-demo")
+            service = DocumentService(engine, settings.document_upload_dir, "knowledge-base")
             page = service.list_chunks(arguments.document_id, arguments.limit, arguments.offset)
             if not page.items:
                 raise EmbeddingError("没有可试跑的片段，请先在资料页生成片段或减小offset")

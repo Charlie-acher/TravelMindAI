@@ -22,6 +22,8 @@ from sqlalchemy.orm import Session
 
 from app.config import Settings
 from app.database import create_database_engine
+from app.models.auth import User
+from tests.helpers import TEST_USER_ID
 
 # 给本文件全部测试标记 postgres；标记本身不负责跳过，下面的 fixture 负责。
 pytestmark = pytest.mark.postgres
@@ -70,7 +72,7 @@ def test_migration_round_trip_matches_models(migrated_database: tuple[Connection
     expected = {
         "sessions", "travel_requests", "itineraries", "requirement_turns", "documents",
         "document_chunks", "document_jobs",
-        "alembic_version"
+        "alembic_version", "users", "auth_sessions",
     }
     assert set(inspect(connection).get_table_names()) == expected
     differences = compare_metadata(MigrationContext.configure(connection), Base.metadata)
@@ -95,16 +97,32 @@ def test_chat_migration_preserves_existing_session(
     connection, config = migrated_database
     connection.commit()
     command.downgrade(config, "0001_business_tables")
-    with Session(connection) as unit:
-        trip = TravelSession(title="升级前已有的会话")
-        unit.add(trip)
-        unit.commit()
-        session_id = trip.id
+    # 用旧表真实具备的字段造旧记录，不能用新增user_id后的ORM写旧版表。
+    session_id = uuid4()
+    connection.execute(text(
+        "INSERT INTO sessions (id,thread_id,title) VALUES (:id,:thread_id,:title)"
+    ), {"id": session_id, "thread_id": uuid4(), "title": "升级前已有的会话"})
     connection.commit()
-    command.upgrade(config, "head")
+    command.upgrade(config, "0009_document_categories")
     with Session(connection) as reader:
         assert reader.get(TravelSession, session_id).title == "升级前已有的会话"
+        assert reader.get(TravelSession, session_id).user_id is None
     assert "requirement_turns" in inspect(connection).get_table_names()
+    connection.commit()
+    with pytest.raises(RuntimeError, match="未认领"):
+        command.upgrade(config, "head")
+    connection.rollback()
+
+
+"""测试账号函数：表约束测试必须先建立真实外键目标，不能再制造匿名会话。"""
+
+def seed_account(connection: Connection) -> None:
+    from sqlalchemy import insert
+
+    connection.execute(insert(User).values(
+        id=TEST_USER_ID, username="schema-user", password_hash="test-only", role="user",
+    ))
+    connection.commit()
 
 
 """用 ORM 写入三张表后，换一个 ORM Session 仍能读到关联数据和精确金额字符串。"""
@@ -113,8 +131,9 @@ def test_orm_rows_survive_session_close(migrated_database: tuple[Connection, Con
     from app.models.trip import Itinerary, TravelRequest, TravelSession
 
     connection, _ = migrated_database
+    seed_account(connection)
     with Session(connection) as unit:
-        trip = TravelSession(title="杭州三日游")
+        trip = TravelSession(user_id=TEST_USER_ID, title="杭州三日游")
         unit.add(trip)
         unit.flush()  # 把 INSERT 发给数据库，得到默认生成的 UUID；此时尚未提交。
         requirement = TravelRequest(
@@ -157,8 +176,9 @@ def test_request_constraints(migrated_database: tuple[Connection, Config], case:
     from app.models.trip import TravelRequest, TravelSession
 
     connection, _ = migrated_database
+    seed_account(connection)
     with Session(connection) as unit:
-        trip = TravelSession(title="约束测试")
+        trip = TravelSession(user_id=TEST_USER_ID, title="约束测试")
         unit.add(trip)
         unit.flush()
         unit.add(TravelRequest(session_id=trip.id, version=1, request_json={"days": 3}))
@@ -194,8 +214,10 @@ def test_itinerary_cannot_reference_another_session(
     from app.models.trip import Itinerary, TravelRequest, TravelSession
 
     connection, _ = migrated_database
+    seed_account(connection)
     with Session(connection) as unit:
-        first, second = TravelSession(title="甲"), TravelSession(title="乙")
+        first = TravelSession(user_id=TEST_USER_ID, title="甲")
+        second = TravelSession(user_id=TEST_USER_ID, title="乙")
         unit.add_all([first, second])
         unit.flush()
         requirement = TravelRequest(session_id=first.id, version=1, request_json={})
@@ -219,8 +241,9 @@ def test_itinerary_constraints(migrated_database: tuple[Connection, Config], cas
     from app.models.trip import Itinerary, TravelRequest, TravelSession
 
     connection, _ = migrated_database
+    seed_account(connection)
     with Session(connection) as unit:
-        trip = TravelSession(title="行程约束测试")
+        trip = TravelSession(user_id=TEST_USER_ID, title="行程约束测试")
         unit.add(trip)
         unit.flush()
         requirement = TravelRequest(session_id=trip.id, version=1, request_json={})
@@ -261,14 +284,15 @@ def test_session_constraints(migrated_database: tuple[Connection, Config], case:
     from app.models.trip import TravelSession
 
     connection, _ = migrated_database
+    seed_account(connection)
     with Session(connection) as unit:
-        trip = TravelSession(title="第一场会话")
+        trip = TravelSession(user_id=TEST_USER_ID, title="第一场会话")
         unit.add(trip)
         unit.flush()
         with pytest.raises(IntegrityError), unit.begin_nested():
             unit.add(
                 TravelSession(
-                    title="第二场会话",
+                    user_id=TEST_USER_ID, title="第二场会话",
                     thread_id=trip.thread_id if case == "duplicate_thread" else uuid4(),
                     status="unknown" if case == "invalid_status" else "active",
                 )

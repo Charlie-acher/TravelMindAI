@@ -11,6 +11,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     ForeignKeyConstraint,
+    Index,
     String,
     UniqueConstraint,
     func,
@@ -29,10 +30,13 @@ class TravelSession(Base):
     __tablename__ = "sessions"  # 数据库中的实际表名。
     __table_args__ = (
         CheckConstraint("status IN ('active', 'archived')", name="ck_sessions_status"),
+        Index("ix_sessions_user_updated", "user_id", "updated_at", "id"),
     )
 
     # 会话主键，Python 在 INSERT 时调用 uuid4 生成；不能写成 uuid4() 提前生成。
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    # 每个会话必须属于注册账号；0010升级前先显式处理旧历史。
+    user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", name="fk_sessions_user"))
     # 预留给 LangGraph 的执行线程编号，每个会话独立；现在还没有检查点表。
     thread_id: Mapped[UUID] = mapped_column(default=uuid4, unique=True)
     # 会话标题，例如“杭州三日游”，最多200个字符。

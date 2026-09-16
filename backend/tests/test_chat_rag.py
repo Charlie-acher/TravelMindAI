@@ -6,7 +6,6 @@ from unittest.mock import Mock
 from uuid import uuid4
 
 import pytest
-from fastapi.testclient import TestClient
 from sqlalchemy import Engine
 
 from app.api.requirement import history as routes
@@ -19,7 +18,8 @@ from app.schemas.requirement.chat import RequirementChatResponse
 from app.services.requirement.extract import build_result
 from app.services.requirement.history import RequirementHistoryService
 from app.services.trip_service import TripService
-from tests.helpers import FakeModel, answer, evidence
+from tests.helpers import TEST_USER_ID, FakeModel, answer, evidence
+from tests.helpers import authenticated_client as TestClient
 
 """响应构造函数：提供旧需求流程产生的结果，等待RAG补充知识回答。"""
 
@@ -57,7 +57,7 @@ def test_saved_clarification_continues_short_reply(store_engine: Engine, monkeyp
         "status": "insufficient", "points": [],
         "clarification": "你更喜欢自然风景还是历史街区？",
     })])
-    session = TripService(store_engine).create_session("距离偏好接续")
+    session = TripService(store_engine).create_session("距离偏好接续", user_id=TEST_USER_ID)
     app = create_app(Settings(database_url=None))
     history_service = RequirementHistoryService(store_engine)
     app.dependency_overrides[routes.get_history_service] = lambda: history_service
@@ -289,7 +289,7 @@ def test_chat_citations_persist_and_retry_is_read_only(
          "attractions": [card]},
         answer(intent="travel_info"),
     ])
-    session = TripService(store_engine).create_session("RAG验收")
+    session = TripService(store_engine).create_session("RAG验收", user_id=TEST_USER_ID)
     app = create_app(Settings(database_url=None))
     history_service = RequirementHistoryService(store_engine)
     app.dependency_overrides[routes.get_history_service] = lambda: history_service

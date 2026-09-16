@@ -3,22 +3,30 @@
 由HTTP接口调用，负责衔接文件读取、磁盘保存和数据库操作。
 """
 
-from collections.abc import Callable
+from __future__ import annotations
+
+import json
+from base64 import urlsafe_b64decode, urlsafe_b64encode
+from binascii import Error as Base64Error
+from collections.abc import Callable, Sequence
+from datetime import datetime
 from hashlib import sha256
 from pathlib import Path
-from typing import BinaryIO
+from typing import Any, BinaryIO
 from uuid import UUID, uuid4
 
 from fastapi import HTTPException
-from sqlalchemy import Engine, func, select
+from sqlalchemy import Engine, func, or_, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.sql import Select
 
 from app.models.document import DocumentChunkRecord, DocumentRecord
 from app.schemas.document.base import (
     DocumentChunk,
     DocumentChunkPage,
+    DocumentCursorPage,
     DocumentDetail,
     DocumentMetadata,
     DocumentSummary,
@@ -59,9 +67,7 @@ def document_view(row: DocumentRecord) -> DocumentDetail:
         warnings=row.warnings_json,
         sections=[ParsedSection.model_validate(part) for part in row.sections_json],
         city=row.city,
-        source=row.source,
-        review_status=row.review_status,
-        poi_id=row.poi_id,
+        category=row.category,
     )
 
 
@@ -125,40 +131,45 @@ class DocumentService:
         except OSError:
             raise HTTPException(503, "资料已停用，原文件清理失败，请检查权限后重试删除") from None
 
-    """资料列表查询函数：先按归属和文件名筛选，再分页读取摘要，不读取全文。"""
+    """筛选条件函数：城市、类别和文件名在列表与计数中使用同一规则。"""
+
+    def _filters(
+        self, query: str = "", metadata: DocumentMetadata | None = None,
+        *, unclassified_city: bool = False,
+    ) -> list[Any]:
+        filters = [DocumentRecord.owner_id == self._owner_id]
+        if metadata is not None:
+            filters.extend(getattr(DocumentRecord, name) == value
+                           for name, value in metadata.model_dump(exclude_none=True).items())
+        if unclassified_city:
+            filters.append(DocumentRecord.city.is_(None))
+        if query.strip():
+            # 百分号和下划线按字面查找，不当作SQL通配符。
+            filters.append(DocumentRecord.file_name.icontains(query.strip(), autoescape=True))
+        return filters
+
+    """摘要查询函数：只读取列表要展示的字段，不读取正文。"""
+
+    def _summary_query(self) -> Select[Any]:
+        return select(
+            DocumentRecord.id, DocumentRecord.file_name, DocumentRecord.mime_type,
+            DocumentRecord.size_bytes, DocumentRecord.content_hash, DocumentRecord.status,
+            DocumentRecord.error_message, DocumentRecord.created_at, DocumentRecord.city,
+            DocumentRecord.category, DocumentRecord.warnings_json.label("warnings"),
+            func.jsonb_array_length(DocumentRecord.sections_json).label("section_count"),
+        )
+
+    """资料列表查询函数：按资料范围筛选后，保留旧偏移分页返回格式。"""
 
     def list(
         self, limit: int = 50, offset: int = 0, query: str = "",
         metadata: DocumentMetadata | None = None,
     ) -> list[DocumentSummary]:
-        filters = [DocumentRecord.owner_id == self._owner_id]
-        if metadata is not None:
-            filters.extend(getattr(DocumentRecord, name) == value
-                           for name, value in metadata.model_dump(exclude_none=True).items())
-        if query.strip():
-            # 按字面查找且不区分英文大小写；%和_不能变成匹配任意文件的通配符。
-            filters.append(DocumentRecord.file_name.icontains(query.strip(), autoescape=True))
+        filters = self._filters(query, metadata)
         with self._sessions() as unit:
             rows = (
                 unit.execute(
-                    select(
-                        DocumentRecord.id,
-                        DocumentRecord.file_name,
-                        DocumentRecord.mime_type,
-                        DocumentRecord.size_bytes,
-                        DocumentRecord.content_hash,
-                        DocumentRecord.status,
-                        DocumentRecord.error_message,
-                        DocumentRecord.created_at,
-                        DocumentRecord.city,
-                        DocumentRecord.source,
-                        DocumentRecord.review_status,
-                        DocumentRecord.poi_id,
-                        DocumentRecord.warnings_json.label("warnings"),
-                        func.jsonb_array_length(DocumentRecord.sections_json).label(
-                            "section_count"
-                        ),
-                    )
+                    self._summary_query()
                     .where(*filters)
                     .order_by(DocumentRecord.created_at.desc(), DocumentRecord.id.desc())
                     .limit(limit)
@@ -168,6 +179,53 @@ class DocumentService:
                 .all()
             )
             return [DocumentSummary.model_validate(dict(row)) for row in rows]
+
+    """城市计数函数：对全部匹配文件分组，数量不受分页限制。"""
+
+    def city_counts(
+        self, query: str = "", city: str | None = None, category: str | None = None,
+        *, unclassified_city: bool = False,
+    ) -> Sequence[dict[str, Any]]:
+        metadata = DocumentMetadata(city=city, category=category)
+        with self._sessions() as unit:
+            rows = unit.execute(select(DocumentRecord.city, func.count().label("total"))
+                                .where(*self._filters(query, metadata,
+                                                      unclassified_city=unclassified_city))
+                                .group_by(DocumentRecord.city)
+                                .order_by(DocumentRecord.city.asc().nulls_last())).mappings().all()
+            return [dict(row) for row in rows]
+
+    """资料游标分页函数：按创建时间和编号倒序，新增文件不会挤动后续页。"""
+
+    def page(
+        self, limit: int = 50, cursor: str | None = None, query: str = "",
+        city: str | None = None, category: str | None = None,
+        *, unclassified_city: bool = False,
+    ) -> DocumentCursorPage:
+        filters = self._filters(query, DocumentMetadata(city=city, category=category),
+                                unclassified_city=unclassified_city)
+        if cursor:
+            try:
+                stamp, identifier = json.loads(urlsafe_b64decode(cursor + "=" * (-len(cursor) % 4)))
+                created_at, record_id = datetime.fromisoformat(stamp), UUID(identifier)
+            except (ValueError, TypeError, UnicodeDecodeError, Base64Error):
+                raise HTTPException(422, "资料分页位置无效") from None
+            filters.append(or_(DocumentRecord.created_at < created_at,
+                               (DocumentRecord.created_at == created_at)
+                               & (DocumentRecord.id < record_id)))
+        with self._sessions() as unit:
+            rows = unit.execute(
+                self._summary_query().where(*filters)
+                .order_by(DocumentRecord.created_at.desc(), DocumentRecord.id.desc())
+                .limit(limit + 1)
+            ).mappings().all()
+        items = [DocumentSummary.model_validate(dict(row)) for row in rows[:limit]]
+        next_cursor = None
+        if len(rows) > limit:
+            last = items[-1]
+            payload = json.dumps([last.created_at.isoformat(), str(last.id)]).encode()
+            next_cursor = urlsafe_b64encode(payload).decode().rstrip("=")
+        return DocumentCursorPage(items=items, next_cursor=next_cursor)
 
     """标签更新函数：锁住当前归属资料，只改显式字段，不重新解析或调用向量模型。"""
 
@@ -322,7 +380,10 @@ class DocumentService:
 
     """资料上传函数：检查文件并查重，读取正文后保存原文件和读取结果。"""
 
-    def upload(self, stream: BinaryIO, file_name: str, mime_type: str) -> DocumentUploadResult:
+    def upload(
+        self, stream: BinaryIO, file_name: str, mime_type: str,
+        *, uploaded_by: UUID | None = None,
+    ) -> DocumentUploadResult:
         # 去掉文件名中的目录，只保留名字用于展示和判断格式。
         file_name = file_name.replace("\\", "/").rsplit("/", 1)[-1].strip()
         if not file_name or len(file_name) > 255 or any(ord(char) < 32 for char in file_name):
@@ -383,6 +444,7 @@ class DocumentService:
                         mime_type=MIME_TYPES[suffix],
                         content_hash=fingerprint,
                         size_bytes=len(content),
+                        uploaded_by=uploaded_by,
                         status="failed" if failure else "parsed",
                         error_message=failure,
                         sections_json=[part.model_dump(mode="json") for part in parsed.sections],

@@ -25,7 +25,9 @@ class DocumentUploadLimitMiddleware:
         if (
             scope["type"] != "http"
             or scope["method"] != "POST"
-            or scope["path"].rstrip("/") != "/api/v1/documents"
+            or scope["path"].rstrip("/") not in {
+                "/api/v1/documents", "/api/v1/admin/documents",
+            }
         ):
             await self.app(scope, receive, send)
             return

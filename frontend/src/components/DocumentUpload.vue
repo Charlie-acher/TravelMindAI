@@ -126,7 +126,7 @@ onBeforeUnmount(() => { mounted = false; stopped.value = true; clearTimeout(time
     <input id="travel-document-file" type="file" multiple accept=".pdf,.docx,.txt,.md,.markdown"
       :disabled="busy || disabled" @change="choose" />
     <p>PDF、DOCX、TXT、Markdown · 单份最多 20 MiB<br />扫描版 PDF 暂不支持文字识别。</p>
-    <p>上传后自动识别城市与来源、切片并建立索引。建立索引会调用已配置的向量服务。</p>
+    <p>上传后自动识别城市与类别、切片并建立索引。建立索引会调用已配置的向量服务。</p>
     <template v-if="queue.length">
       <p role="status">共 {{ queue.length }} 份 · 已确认保存 {{ confirmed }} 份 · 索引完成 {{ completed }} 份 · 待上传 {{ pending.length }} 份</p>
       <div class="upload-actions">

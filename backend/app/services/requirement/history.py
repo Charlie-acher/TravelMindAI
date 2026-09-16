@@ -100,6 +100,9 @@ class RequirementHistoryService:
                 response_json=response.model_dump(mode="json"),
             )
             unit.add(row)
+            # 首次成功消息与标题一起提交，不额外调用模型；失败不修改标题。
+            if revision == 0 and trip.title in {"新建对话", "旅行需求对话"}:
+                trip.title = " ".join(response.result.original_message.split())[:40]
             # 与对话记录在同一事务提交，异常时不会留半条消息或占用轮次。
             trip.updated_at = func.clock_timestamp()
             unit.flush()

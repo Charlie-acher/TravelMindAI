@@ -6,13 +6,13 @@
 
 
 import pytest
-from fastapi.testclient import TestClient
 
 from app.api.requirement.routes import get_requirement_model
 from app.config import Settings
 from app.llm.client import ModelClientError
 from app.main import create_app
 from tests.helpers import FakeModel, answer
+from tests.helpers import authenticated_client as TestClient
 
 """先说城市再补充人数预算，响应给出回复、需求、状态、变化字段和请求编号。"""
 

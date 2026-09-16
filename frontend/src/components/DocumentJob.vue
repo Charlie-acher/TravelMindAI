@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /** 资料后台任务组件：只轮询状态，关闭页面不取消后台任务，暂停须明确点击。 */
 import { onBeforeUnmount, onMounted, ref } from 'vue'
-import { readResponse } from '../api/http'
+import { apiFetch, readResponse } from '../api/http'
 
 const props = defineProps<{ documentId: string; parsed: boolean }>()
 const emit = defineEmits<{ completed: [] }>()
@@ -25,11 +25,12 @@ async function refresh(): Promise<void> {
   const token = ++generation
   try {
     const previous = job.value?.status
-    const result = await readResponse<Job | null>(await fetch(`/api/v1/documents/${props.documentId}/job`), true)
+    const result = await readResponse<Job | null>(await apiFetch(`/api/v1/admin/documents/${props.documentId}/job`), true)
     if (!alive || token !== generation) return
     job.value = result
     error.value = ''
-    if (result?.status === 'completed' && previous !== 'completed') emit('completed')
+    // 初次打开已完成资料无需刷新目录；只有观察到处理结束时更新片段。
+    if (result?.status === 'completed' && previous && previous !== 'completed') emit('completed')
     if (result && ['queued', 'running'].includes(result.status)) timer = setTimeout(() => { void refresh() }, 1500)
   } catch (cause) {
     if (alive && token === generation) error.value = cause instanceof Error ? cause.message : '任务状态读取失败，请刷新。'
@@ -44,7 +45,7 @@ async function submit(pause = false): Promise<void> {
   busy.value = true
   error.value = ''
   try {
-    const response = await fetch(`/api/v1/documents/${props.documentId}/job${pause ? '/pause' : ''}`, {
+    const response = await apiFetch(`/api/v1/admin/documents/${props.documentId}/job${pause ? '/pause' : ''}`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       ...(pause ? {} : { body: JSON.stringify({ kind: props.parsed ? 'index' : 'parse' }) }),
     })
@@ -63,19 +64,18 @@ onBeforeUnmount(() => { alive = false; ++generation; clearTimeout(timer) })
 
 <template>
   <section class="document-job" aria-label="资料后台任务">
-    <h3>后台处理</h3>
-    <p>后台处理在切换或关闭页面后继续。建立索引会调用向量服务；服务中断后需要手动重试。</p>
-    <p v-if="job" role="status">{{ job.kind === 'parse' ? '重新读取' : '建立索引' }}：{{ labels[job.status] }}<span v-if="job.total"> · 已确认 {{ job.indexed }} / {{ job.total }} 段</span></p>
+    <p v-if="job" role="status">{{ job.kind === 'parse' ? '读取' : '索引' }}：{{ labels[job.status] }}<span v-if="job.total"> · {{ job.indexed }} / {{ job.total }} 段</span></p>
+    <p v-else>尚无后台任务。</p>
     <p v-if="job?.error_message" role="alert">{{ job.error_message }}</p>
     <p v-if="error" role="alert">{{ error }}</p>
-    <button :disabled="busy" @click="refresh">刷新后台状态</button>
-    <button v-if="job && ['queued', 'running'].includes(job.status)" :disabled="busy" @click="submit(true)">当前批次后暂停后台处理</button>
-    <button v-else :disabled="busy" @click="submit()">{{ parsed ? '后台建立 / 续建索引' : '后台重新读取原件' }}</button>
+    <button v-if="error || job?.status === 'failed' || job?.status === 'paused'" :disabled="busy" @click="refresh">刷新状态</button>
+    <button v-if="job && ['queued', 'running'].includes(job.status)" :disabled="busy" @click="submit(true)">暂停处理</button>
+    <button v-else-if="!job || ['failed', 'paused'].includes(job.status)" :disabled="busy" @click="submit()">{{ parsed ? '重试索引' : '重试读取' }}</button>
   </section>
 </template>
 
 <style scoped>
-.document-job { border: 1px solid #dfe8e2; border-radius: 8px; padding: 14px; margin: 14px 0; }
-p { font-size: 13px; line-height: 1.7; }
+.document-job { border-top: 1px solid #dfe8e2; padding: 8px 0; margin: 8px 0; }
+p { font-size: 13px; line-height: 1.5; margin: 5px 0; }
 button { margin: 4px 8px 4px 0; padding: 8px 12px; cursor: pointer; }
 </style>

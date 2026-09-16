@@ -17,6 +17,7 @@ from app.services.document.jobs import DocumentJobService
 from app.services.document.search import DocumentSearchService
 from app.services.document.service import DocumentService
 from app.services.document.vector_store import MilvusStore
+from app.services.knowledge_scope import KNOWLEDGE_SCOPE, require_knowledge_ready
 
 router = APIRouter(prefix="/documents", tags=["资料后台处理"])
 
@@ -24,10 +25,11 @@ router = APIRouter(prefix="/documents", tags=["资料后台处理"])
 """任务服务获取函数：使用应用数据库，归属只由后端提供。"""
 
 def get_job_service(request: Request) -> DocumentJobService:
+    require_knowledge_ready(request)
     engine = request.app.state.database_engine
     if engine is None:
         raise HTTPException(503, "未启用数据库，请配置后重启服务")
-    service = DocumentJobService(engine, "local-demo")
+    service = DocumentJobService(engine, KNOWLEDGE_SCOPE)
     with request.app.state.document_job_recovery_lock:
         if not request.app.state.document_jobs_recovered:
             # 首次恢复只运行一次，不能把另一个请求刚排队的任务误标中断。
@@ -45,6 +47,7 @@ JobDependency = Annotated[DocumentJobService, Depends(get_job_service)]
 """后台排队函数：等待空位时不占线程池，拿到空位后执行原有同步业务。"""
 
 async def run_queued_job(request: Request, job: DocumentJobView) -> None:
+    # 入队接口已经检查共享范围；数据库操作在下方线程内执行并纳入失败恢复。
     async with request.app.state.document_job_slots:
         try:
             await run_in_threadpool(
@@ -65,8 +68,8 @@ async def run_queued_job(request: Request, job: DocumentJobView) -> None:
 def process_document_job(
     engine: Engine, settings: Settings, job: DocumentJobView,
 ) -> None:
-    jobs = DocumentJobService(engine, "local-demo")
-    documents = DocumentService(engine, settings.document_upload_dir, "local-demo")
+    jobs = DocumentJobService(engine, KNOWLEDGE_SCOPE)
+    documents = DocumentService(engine, settings.document_upload_dir, KNOWLEDGE_SCOPE)
     # HTTP连接的生命周期覆盖整个后台任务，页面关闭不会关闭这些连接。
     with httpx.Client() as http:
         search: DocumentSearchService | None = None
@@ -84,7 +87,7 @@ def process_document_job(
                 documents.generate_chunks(job.document_id)
                 search = DocumentSearchService(
                     engine, MilvusStore(settings, http), EmbeddingClient(settings, http),
-                    "local-demo",
+                    KNOWLEDGE_SCOPE,
                 )
             return search.index_batch(job.document_id)
 

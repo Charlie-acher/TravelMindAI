@@ -18,6 +18,7 @@ from sqlalchemy.engine import make_url
 
 from app.config import Settings
 from app.database import create_database_engine
+from tests.helpers import TEST_USER_ID
 
 """创建临时 schema 和专用 Engine，保证并发线程各用自己的数据库连接。"""
 
@@ -45,6 +46,16 @@ def store_engine() -> Iterator[Engine]:
             with engine.connect() as connection:
                 config.attributes["connection"] = connection
                 command.upgrade(config, "head")
+            # 旧业务回归也写入真实账号外键；权限测试另外通过真实注册/登录验证。
+            from sqlalchemy import insert
+
+            from app.models.auth import User
+
+            with engine.begin() as connection:
+                connection.execute(insert(User).values(
+                    id=TEST_USER_ID, username="legacy-test", password_hash="test-only",
+                    role="admin",
+                ))
             yield engine
         finally:
             # 先关闭测试连接，再删除自己创建的 schema；从不删除 public 的表。

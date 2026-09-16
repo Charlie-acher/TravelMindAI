@@ -2,18 +2,20 @@
 应用入口层：创建FastAPI应用，连接各接口和服务，管理数据库生命周期并注册统一错误处理。
 """
 
-from asyncio import Semaphore
+from asyncio import Semaphore, gather
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from threading import Lock
 from uuid import uuid4
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from sqlalchemy.exc import SQLAlchemyError
 from starlette.concurrency import run_in_threadpool
 from starlette.middleware.base import RequestResponseEndpoint
 from starlette.responses import Response
 
+from app.api.auth import LoginLimiter, get_current_user, require_admin
+from app.api.auth import router as auth_router
 from app.api.budget import router as budget_router
 from app.api.document.jobs import router as document_jobs_router
 from app.api.document.routes import router as documents_router
@@ -28,6 +30,7 @@ from app.config import Settings, load_settings
 from app.database import create_database_engine
 from app.schemas.common import ErrorResponse
 from app.services.document.jobs import DocumentJobService
+from app.services.knowledge_scope import KNOWLEDGE_SCOPE
 from app.services.trip_service import TripService
 
 """应用创建函数：加载配置，注册接口和错误处理。"""
@@ -56,7 +59,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 # 只把上次中断的任务标为可重试；启动服务不会自动产生模型费用。
                 try:
                     await run_in_threadpool(
-                        DocumentJobService(engine, "local-demo").recover_interrupted,
+                        DocumentJobService(engine, KNOWLEDGE_SCOPE).recover_interrupted,
                     )
                     application.state.document_jobs_recovered = True
                 except SQLAlchemyError:
@@ -65,7 +68,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             # 启动准备完成，应用开始处理请求。
             yield
         finally:
-
+            # 已断开浏览器的流式任务仍可能保存；先等其连接退出，再释放共享数据库。
+            if application.state.chat_workers:
+                await gather(*tuple(application.state.chat_workers))
             # 应用关闭后清理数据库资源。
             application.state.trip_service = None  # 清除存储实例
             application.state.database_engine = None  # 清除数据库引擎
@@ -83,6 +88,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     # 配置只保存在后端进程；对话路由通过依赖取得配置，浏览器不会收到密钥。
     app.state.settings = settings
+    app.state.chat_workers = set()
+    app.state.login_limiter = LoginLimiter()
     # 中间件后注册的先执行：先生成请求编号，再检查上传大小，报错时也能查到编号。
     app.add_middleware(DocumentUploadLimitMiddleware)
 
@@ -96,18 +103,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         response = await call_next(request)
         # 在响应头中添加请求ID，便于追踪和调试
         response.headers["X-Request-ID"] = request.state.request_id
+        # 登录与私人历史不得留在浏览器或代理共享缓存中。
+        if request.url.path.startswith("/api/v1/"):
+            response.headers["Cache-Control"] = "no-store"
         return response
 
     register_error_handlers(app)
     app.include_router(health_router, prefix="/api/v1")
+    app.include_router(auth_router, prefix="/api/v1")
 
     # /api/v1 与 router 的 /budget、函数的 /estimate 拼成完整接口路径。
     app.include_router(budget_router, prefix="/api/v1")
-    app.include_router(sessions_router, prefix="/api/v1")
-    app.include_router(requirements_router, prefix="/api/v1")
-    app.include_router(requirement_history_router, prefix="/api/v1")
+    for router in (sessions_router, requirements_router, requirement_history_router):
+        app.include_router(router, prefix="/api/v1", dependencies=[Depends(get_current_user)])
     # 注册资料接口，使用应用已有的数据库连接和统一错误格式。
-    app.include_router(documents_router, prefix="/api/v1")
-    app.include_router(document_search_router, prefix="/api/v1")
-    app.include_router(document_jobs_router, prefix="/api/v1")
+    for prefix in ("/api/v1", "/api/v1/admin"):
+        for router in (documents_router, document_search_router, document_jobs_router):
+            app.include_router(router, prefix=prefix, dependencies=[Depends(require_admin)])
     return app

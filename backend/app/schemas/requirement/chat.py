@@ -7,6 +7,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.schemas.dining import DiningResult
 from app.schemas.document.answer import AnswerResult
 from app.schemas.requirement.base import RequirementResult, TravelRequestExtraction
 
@@ -30,3 +31,4 @@ class RequirementChatResponse(BaseModel):
     changed_fields: list[str]  # 本轮实际发生变化的业务字段，供前端高亮。
     request_id: str  # 排查失败时可对照响应头X-Request-ID。
     knowledge: AnswerResult | None = None  # 本轮RAG回答及原文快照；旧历史没有此字段时为None。
+    dining: DiningResult | None = None  # 餐饮事实来自高德周边，连同锚点保存在原有JSON快照。

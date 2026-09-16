@@ -7,7 +7,6 @@
 from uuid import UUID, uuid4
 
 import pytest
-from fastapi.testclient import TestClient
 from pydantic import SecretStr
 from sqlalchemy import Engine, event, func, select, text
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
@@ -16,6 +15,7 @@ from sqlalchemy.orm import Session
 from app.config import Settings
 from app.main import create_app
 from app.models.trip import Itinerary
+from tests.helpers import authenticated_client as TestClient
 
 """把临时数据库连接地址交给应用，应用自身创建并管理连接池。"""
 
@@ -229,7 +229,7 @@ def test_database_errors_use_safe_envelopes(
 
     """模拟存储边界抛异常；本用例不会连接地址所指向的数据库。"""
 
-    def reject_create(self: TripService, title: str) -> None:
+    def reject_create(self: TripService, title: str, *, user_id: UUID | None = None) -> None:
         raise failure
 
     monkeypatch.setattr(TripService, "create_session", reject_create)

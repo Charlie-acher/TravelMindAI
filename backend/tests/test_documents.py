@@ -9,13 +9,13 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
-from fastapi.testclient import TestClient
 from sqlalchemy import Engine
 
 from app.api.document.routes import get_document_service
 from app.config import Settings
 from app.main import create_app
 from app.services.document.service import DocumentService
+from tests.helpers import authenticated_client as TestClient
 
 """只封装真实服务调用的公共入参，不替换哈希、读取器或数据库逻辑。"""
 
@@ -276,12 +276,13 @@ def test_retry_parse_http_and_lock(store_engine: Engine, tmp_path: Path):
 """超大上传必须在multipart读取和服务依赖执行前拒绝，而不是写完整个临时文件再查大小。"""
 
 
+@pytest.mark.parametrize("path", ["/api/v1/documents", "/api/v1/admin/documents"])
 @pytest.mark.parametrize("chunked", [False, True])
-def test_oversized_request_is_rejected_before_database_dependency(chunked: bool) -> None:
+def test_oversized_request_is_rejected_before_database_dependency(chunked: bool, path: str) -> None:
     body = b"x" * (21 * 1024 * 1024)
     with TestClient(create_app(Settings(database_url=None))) as client:
         response = client.post(
-            "/api/v1/documents",
+            path,
             # 迭代器上传不带Content-Length，必须由实际字节计数拦截。
             content=iter([body[: 10 * 1024 * 1024], body[10 * 1024 * 1024 :]]) if chunked else body,
             headers={"Content-Type": "multipart/form-data; boundary=test"},

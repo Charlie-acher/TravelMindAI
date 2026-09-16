@@ -4,10 +4,11 @@
 
 from copy import deepcopy
 from dataclasses import dataclass
+from datetime import datetime
 from uuid import UUID
 
 from pydantic import JsonValue
-from sqlalchemy import Engine, func, select, update
+from sqlalchemy import Engine, func, select, tuple_, update
 from sqlalchemy.orm import sessionmaker
 
 from app.models.trip import Itinerary, TravelRequest, TravelSession
@@ -37,14 +38,14 @@ class TripService:
 
     """会话创建方法：检查标题并将新会话保存到数据库。"""
 
-    def create_session(self, title: str) -> TravelSession:
+    def create_session(self, title: str, *, user_id: UUID) -> TravelSession:
         title = title.strip()
         if not 1 <= len(title) <= 200:
             raise ValueError("会话标题必须为1到200个字符")
 
         # begin() 管理完整事务：正常退出时 commit；抛异常时 rollback；最后关闭 Session。
         with self._sessions.begin() as unit:
-            trip = TravelSession(title=title)
+            trip = TravelSession(title=title, user_id=user_id)
             unit.add(trip)
             unit.flush()  # 发出 INSERT，取得数据库生成的时间等字段，但此时还没有提交。
         # 走到 with 外面才表示提交成功；失败时异常会直接向调用方传播。
@@ -55,6 +56,21 @@ class TripService:
     def get_session(self, session_id: UUID) -> TravelSession | None:
         with self._sessions() as unit:
             return unit.get(TravelSession, session_id)
+
+    """历史列表函数：只列出当前账号，以更新时间和编号作稳定分页。"""
+
+    def list_sessions(
+        self, user_id: UUID, limit: int, cursor: tuple[datetime, UUID] | None = None,
+    ) -> list[TravelSession]:
+        query = select(TravelSession).where(
+            TravelSession.user_id == user_id, TravelSession.status == "active",
+        )
+        if cursor is not None:
+            query = query.where(tuple_(TravelSession.updated_at, TravelSession.id) < cursor)
+        with self._sessions() as unit:
+            return list(unit.scalars(query.order_by(
+                TravelSession.updated_at.desc(), TravelSession.id.desc(),
+            ).limit(limit + 1)))
 
 
     """草稿保存方法：一起保存需求和行程，并生成新版本号。"""

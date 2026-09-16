@@ -1,10 +1,33 @@
 """测试辅助层：集中放置多份测试共用的示例数据和离线模型替身。"""
 
 import json
-from uuid import uuid4
+from uuid import UUID, uuid4
+
+from fastapi import FastAPI
+from fastapi.testclient import TestClient as StarletteTestClient
 
 from app.schemas.document.base import DocumentChunk
 from app.schemas.document.search import SearchHit
+
+TEST_USER_ID = UUID("00000000-0000-4000-8000-000000000001")
+
+
+"""旧业务测试客户端函数：显式替换身份与归属依赖，保留原有业务边界测试。
+
+仅用于认证加入前的独立业务回归。权限验收见test_auth.py，使用真实账号、Cookie与数据库。
+测试身份由store_engine种入临时schema；无数据库的错误测试只替换身份依赖。
+"""
+
+def authenticated_client(app: FastAPI, **kwargs):
+    from app.api.auth import get_current_user, require_session_owner
+    from app.models.auth import User
+
+    app.dependency_overrides[get_current_user] = lambda: User(
+        id=TEST_USER_ID, username="legacy-test", role="admin", is_active=True,
+    )
+    app.dependency_overrides[require_session_owner] = lambda: None
+    headers = {"X-Requested-With": "TravelMindAI", **kwargs.pop("headers", {})}
+    return StarletteTestClient(app, headers=headers, **kwargs)
 
 """构造模型输出，null表示这轮未提到；kwargs按用例覆盖字段。"""
 

@@ -8,9 +8,9 @@ from collections.abc import Iterator
 from uuid import UUID
 
 import pytest
-from fastapi.testclient import TestClient
 
 from app.main import create_app
+from tests.helpers import authenticated_client as TestClient
 
 """每个用例独立创建应用，避免受电脑上临时设置的环境变量影响。
 

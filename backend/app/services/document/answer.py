@@ -22,6 +22,7 @@ from app.schemas.document.answer import (
 )
 from app.schemas.document.search import SearchHit
 from app.services.amap import AmapClient
+from app.services.chat.events import progress, public_answer
 from app.services.document.maps import supplement_maps
 from app.services.document.places import (
     build_attraction_cards,
@@ -97,8 +98,12 @@ ChinaTravel-Sandbox的price、opentime、closetime、recommendmintime、recommen
 conversation_context只帮助理解指代，不能作为事实依据。不重复回答历史问题。
 若收到validation_error，修正invalid_answer中的格式或证据对应问题；不能为通过校验编造内容。
 推荐景点时应保留或替换有依据的卡片，不要仅清空attractions而在points继续罗列景点。
-只登记旅行条件、没有知识问题时返回insufficient；无相关事实也返回insufficient，不自由发挥。
-输出JSON：{"status":"answered","points":[{"text":"总体建议","source_ids":[1]}],
+只登记人数、日期、预算等条件、没有知识问题时返回insufficient；无相关事实也返回insufficient，不自由发挥。
+当question明确要求目的地简介时，先用一两句有来源的城市整体介绍接住旅行意愿，不罗列景点卡片，
+attractions保持空数组，不申请地图。不要替用户假定天数、人数或预算，补问由程序统一附加。
+像朋友聊旅行一样说清楚适合看什么、体验什么，避免“旅游产品、文旅融合、以某某为核心”等宣传腔。
+为便于逐步展示公开回答，每个point先写source_ids，再写text。不要输出思维过程。
+输出JSON：{"status":"answered","points":[{"source_ids":[1],"text":"总体建议"}],
 "attractions":[{"city":"杭州","name":"证据中的名称","description":"具体介绍","reason":"推荐原因",
 "source_ids":[1],"ticket":{"status":"unknown","summary":"门票暂无法确认"}}],"map_queries":[]}。
 最多6个points，每点最多1200字，最多3个attractions。无法回答时points与attractions均为空数组。
@@ -140,11 +145,14 @@ def answer_from_sources(
     query: str, hits: list[SearchHit], model: ModelClient | None = None,
     *, conversation_context: str = "", maps: AmapClient | None = None,
     web: WebSearchClient | None = None,
+    overview: bool = False,
 ) -> AnswerResult:
     # 先搜索用户原问题；选出景点后，再对最多三个地点的缺失门票/地址各补查一次。
     # 新问题不加旧地点或统一门票词；明确追问才带最近地点，避免搜索跑偏。
     topic = search_context(query, conversation_context)
     search_query = query[:300] + ("\n" + topic if topic else "")
+    if web is not None:
+        progress("web", "正在补查公开旅行信息")
     web_result = (web.search(search_query)
                   if web is not None else WebSearchResult(status="not_requested"))
     if not hits and not web_result.items:
@@ -173,12 +181,25 @@ def answer_from_sources(
     repaired = False
     # 正常两遍；整轮最多另给一次格式修正机会，工具查询仍只执行一批。
     for _ in range(3):
-        raw = model.generate_json([
-            {"role": "system", "content": ANSWER_INSTRUCTIONS},
-            {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
-        ])
+        progress("answer", "正在根据已找到的信息组织回答")
+        instructions = ANSWER_INSTRUCTIONS
+        if overview:
+            instructions += (
+                "\n本次只做旅行聊天的简短开场：points最多1条、正文控制在60至100字、最多两句话。"
+                "只选资料支持的两三种代表性旅行体验，不罗列景区数量、政策、排名、年卡或统计数据。"
+                "用轻松口语，不复述官方新闻稿；attractions=[]、map_queries=[]，不额外追问。"
+            )
+        with public_answer(set(texts)):
+            raw = model.generate_json([
+                {"role": "system", "content": instructions},
+                {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
+            ])
         try:
             answer, malformed_details = read_model_answer(raw)
+            if overview:
+                # 城市开场只展示有引用的短介绍，避免引出不必要的逐景点地图和票务补查。
+                answer.attractions = []
+                answer.map_queries = []
             if answer.status == "insufficient" and (answer.attractions or answer.map_queries):
                 raise ValueError("只追问或资料不足时不应同时推荐未核实景点")
             # 第二遍只遗漏卡片时保留已校验的草稿，避免工具查询后卡片反而消失。
@@ -202,6 +223,8 @@ def answer_from_sources(
             if maps_done and answer.map_queries:
                 raise ValueError("不能重复请求地图")
             if not maps_done:
+                if answer.attractions or answer.map_queries:
+                    progress("map", "正在用高德核对景点位置")
                 lookups = supplement_maps(answer, evidence, maps, web_result.items)
             else:
                 build_attraction_cards(answer.attractions, lookups)
@@ -209,6 +232,7 @@ def answer_from_sources(
             if repaired:
                 raise HTTPException(502, "资料回答格式或引用校验失败，请重新提问") from None
             repaired = True
+            progress("verify", "正在重新核对回答的格式和引用")
             payload["invalid_answer"] = raw
             payload["validation_error"] = str(error)[:1200]
             continue

@@ -1,28 +1,31 @@
 %% M1-M3结构参考；文档正式排版源为同名SVG，PNG从SVG导出。
 flowchart TB
     subgraph INPUT["使用入口"]
-        UI["Vue旅行页面：M2对话 / M3资料标签与后台任务"]
+        UI["Vue旅行页面：首问登录 / SSE对话 / 私人历史 / 管理员资料"]
         CLI["接口文档与脚本：M1预算 / 会话 / 草稿"]
     end
-    HTTP["FastAPI：预算、会话、需求对话、资料标签、后台任务、索引与搜索"]
+    HTTP["FastAPI：认证、会话归属、管理员校验、预算、JSON/SSE聊天、资料"]
     INPUT --> HTTP
     subgraph BUSINESS["业务服务层"]
         M1["M1：固定预算 / 会话 / 版本草稿"]
-        M2["M2：需求提取 / 校验合并 / 补问 / 历史"]
-        M3["M3：资料读写与标签预填 / 标签先筛候选 / 自动切片与索引（并发两份） / 原文检索 / RAG"]
+        M2["M2：需求提取 / 校验合并 / 自然补问 / SSE事件 / 整轮保存"]
+        M3["M3：资料读写与标签预填 / 标签先筛候选 / 自动切片与索引（并发两份） / 原文检索 / RAG；餐饮专门地图分支"]
     end
     HTTP --> BUSINESS
     subgraph RESOURCES["按业务需要调用或读写"]
         DS["DeepSeek：提取与证据回答"]
         EMB["阿里云Embedding：文字向量化"]
-        MAP["高德 / Tavily：地点与网页，需Key"]
-        PG["PostgreSQL：会话 / 需求 / 草稿 / 正文 / 片段 / 快照 / 资料标签0006 / document_jobs 0007"]
+        MAP["高德 / Tavily：地点、附近餐饮与网页，需Key"]
+        PG["PostgreSQL：会话 / 需求 / 草稿 / 正文 / 片段 / 快照 / users / auth_sessions / city与category / document_jobs"]
         MV["Milvus：按归属及候选资料编号搜索向量"]
         FILES["本地原文件"]
     end
     BUSINESS --> RESOURCES
-    %% 城市city / 来源source / 审核review_status / poi_id先在PostgreSQL精确筛选可用资料。
+    %% 城市city / 类别category先在PostgreSQL精确筛选可用资料。
     %% 每500个候选UUID限定Milvus检索，合并分数后再次回库核对；修改标签无需重建索引。
     %% 后台解析/索引的状态写document_jobs；关闭页面继续，暂停/失败后显式继续或重试。
     %% 启动识别中断任务并等待显式重试，不自动追加模型调用；迁移0007依赖0006。
     %% 主聊天由M2与M3共同完成；尚未自动计算预算或生成每日行程。
+
+    %% 普通知识：RAG与引用核对；餐饮：精确锚点→高德2000米→真实4至5分最多5家。
+    %% SSE：progress→draft/reset（待核对）→最终校验→短事务保存→done。

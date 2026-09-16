@@ -67,7 +67,15 @@ def build_result(
     missing: list[RequiredField] = []
     if extraction.intent == "plan_trip":
         missing = [field for field in REQUIRED_LABELS if getattr(extraction, field) is None]
-    question = "请一起补充：" + "、".join(REQUIRED_LABELS[field] for field in missing) + "。"
+    questions = {
+        "destination": "你想去哪个城市",
+        "travelers": "这次准备几个人一起去",
+        "days": "大概想玩几天",
+        "total_budget": "整趟旅行的总预算大约多少元",
+    }
+    question = "，".join(questions[field] for field in (
+        "destination", "travelers", "days", "total_budget",
+    ) if field in missing) + "？还没想好也没关系，可以先说个大概。"
     return RequirementResult(
         original_message=message,
         reference_date=reference_date,

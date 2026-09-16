@@ -7,6 +7,7 @@ from langchain_openai import ChatOpenAI
 from openai import APIConnectionError, APIStatusError, APITimeoutError, OpenAIError
 
 from app.config import Settings
+from app.services.chat.events import draft_text, emit, event_sink
 
 
 class ModelClientError(RuntimeError):
@@ -42,6 +43,24 @@ class DeepSeekClient:
     def generate_json(self, messages: list[dict[str, str]]) -> str:
         try:
             # 2. invoke表示“现在把消息发给模型”，JSON模式要求返回JSON文本。
+            if event_sink.get() is not None:
+                # 使用提供方真实分片；只展示公开 points 草稿，最终结果仍须完整校验。
+                content, finish, last_draft = "", None, ""
+                for chunk in self.model.stream(messages, response_format={"type": "json_object"}):
+                    if not isinstance(chunk.content, str):
+                        raise ModelClientError("DeepSeek没有返回文本答案")
+                    content += chunk.content
+                    finish = chunk.response_metadata.get("finish_reason") or finish
+                    draft = draft_text(content)
+                    # 合并很小的分片，减少页面刷新；没有人为等待或打字动画。
+                    if draft != last_draft and (
+                        len(draft) - len(last_draft) >= 24 or len(draft) < len(last_draft) or finish
+                    ):
+                        emit("draft", text=draft)
+                        last_draft = draft
+                if finish != "stop":
+                    raise ModelClientError("DeepSeek返回了无法使用的响应或答案被截断")
+                return content
             response = self.model.invoke(
                 messages,
                 response_format={"type": "json_object"},  # 要求JSON文本，之后再校验字段。

@@ -31,6 +31,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="保存演示草稿，或按会话 ID 读取已有草稿")
     parser.add_argument("--env-file", type=Path, help="显式指定数据库配置文件")
     parser.add_argument("--session-id", type=UUID, help="只读取这个会话的最新草稿，不新增数据")
+    parser.add_argument("--user-id", type=UUID, help="新建演示会话必须指定已注册账号")
     arguments = parser.parse_args(argv)
     if arguments.env_file is not None and not arguments.env_file.is_file():
         print("配置文件不存在，请检查 --env-file 路径。", file=sys.stderr)
@@ -46,6 +47,9 @@ def main(argv: list[str] | None = None) -> int:
                 print("没有找到该会话的草稿，请检查 session-id。", file=sys.stderr)
                 return 1
         else:
+            if arguments.user_id is None:
+                print("新建会话须指定已注册账号的--user-id。", file=sys.stderr)
+                return 1
             # 复用已有输入校验和预算公式，不另写一套金额计算逻辑。
             request = BudgetInput(days=3, travelers=2, total_budget=Decimal("5000.00"))
             estimate = calculate_budget(
@@ -54,7 +58,7 @@ def main(argv: list[str] | None = None) -> int:
                 total_budget=request.total_budget,
                 lodging=request.lodging,
             )
-            trip = store.create_session("M1-B 存储演示：两人三天")
+            trip = store.create_session("M1-B 存储演示：两人三天", user_id=arguments.user_id)
             saved = store.save_draft(
                 trip.id,
                 # mode="json" 把 Decimal、date 等转换成可以写进 JSONB 的字符串。

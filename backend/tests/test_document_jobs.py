@@ -208,10 +208,9 @@ DocumentJobService(engine, 'owner-a').execute(
 def test_job_api_and_parse_failure(
     store_engine: Engine, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from fastapi.testclient import TestClient
-
     from app.config import Settings
     from app.main import create_app
+    from tests.helpers import authenticated_client as TestClient
 
     monkeypatch.setattr("app.main.create_database_engine", lambda _: store_engine)
     settings = Settings(database_url="postgresql+psycopg://unused", document_upload_dir=tmp_path)

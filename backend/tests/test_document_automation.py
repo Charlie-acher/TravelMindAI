@@ -6,13 +6,13 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
-from fastapi.testclient import TestClient
 from sqlalchemy import Engine
 
 from app.config import Settings
 from app.main import create_app
 from app.schemas.document.base import DocumentMetadata
 from app.services.document.service import DocumentService
+from tests.helpers import authenticated_client as TestClient
 
 """标签预填测试函数：新资料识别文件名和明确字段，重复上传保留人工标签。"""
 
@@ -20,29 +20,26 @@ def test_upload_prefills_and_keeps_manual_metadata(store_engine: Engine, tmp_pat
     service = DocumentService(store_engine, tmp_path, "owner-a")
     content = "# 重庆餐馆\n\n城市：重庆市\n\n火锅资料".encode()
     saved = service.upload(BytesIO(content), "重庆-餐馆-ChinaTravel.md", "text/markdown").document
-    assert (saved.city, saved.source, saved.review_status, saved.poi_id) == (
-        "重庆", "ChinaTravel", "pending", None,
-    )
-    service.update_metadata(saved.id, DocumentMetadata(city="人工城市", review_status="approved"))
+    assert (saved.city, saved.category) == ("重庆", "餐馆")
+    service.update_metadata(saved.id, DocumentMetadata(city="人工城市", category="景点"))
     same = service.upload(BytesIO(content), "杭州-LvBanGPT.md", "text/markdown")
-    assert same.duplicate and same.document.city == "人工城市"
-    assert same.document.review_status == "approved"
+    assert same.duplicate and same.document.city == "人工城"
+    assert same.document.category == "景点"
 
 
 """识别边界测试函数：多城市不随意选一个，明确城市字段支持非常见城市。"""
 
 def test_metadata_inference_boundaries(store_engine: Engine, tmp_path: Path) -> None:
     service = DocumentService(store_engine, tmp_path, "owner-a")
-    for name, body, city, source in [
-        ("游记.txt", "城市：景德镇市\n来源：作者笔记", "景德镇", "作者笔记"),
+    for name, body, city, category in [
+        ("游记.txt", "城市：景德镇市\n来源：作者笔记", "景德镇", None),
         ("杭州-上海攻略.md", "杭州和上海的比较", None, None),
         ("攻略.txt", "这座城市不错，来源不详。", None, None),
-        ("深圳-景点-LvBanGPT.md", "深圳公园", "深圳", "LvBanGPT"),
+        ("深圳-景点-LvBanGPT.md", "深圳公园", "深圳", "景点"),
         ("交通.txt", "出发城市：北京\n目的地城市：上海", None, None),
     ]:
         result = service.upload(BytesIO(body.encode()), name, "text/plain").document
-        assert (result.city, result.source) == (city, source)
-        assert result.review_status == "pending" and result.poi_id is None
+        assert (result.city, result.category) == (city, category)
 
 
 """自动处理接口测试函数：开启自动处理后切片并记录失败，关闭时只保存，单份失败不挡下一份。"""
@@ -63,9 +60,9 @@ def test_auto_upload_schedules_jobs_and_prefill_is_owner_scoped(
         assert job and job["kind"] == "index" and job["status"] == "failed"
         assert client.get(path + "/chunks").json()["total"] == 2
         assert response.json()["processing_error"] is None
-        client.patch(path + "/metadata", json={"city": None, "source": "人工来源"})
+        client.patch(path + "/metadata", json={"city": None, "category": "景点"})
         filled = client.post(path + "/metadata/prefill").json()
-        assert filled["city"] == "杭州" and filled["source"] == "人工来源"
+        assert filled["city"] == "杭州" and filled["category"] == "景点"
         other = DocumentService(store_engine, tmp_path, "other").upload(
             BytesIO(b"other"), "other.txt", "text/plain",
         ).document
@@ -101,6 +98,7 @@ def test_batch_jobs_limit_workers_without_blocking_loop(monkeypatch: pytest.Monk
 
     from app.api.document.jobs import run_queued_job
 
+    monkeypatch.setattr("app.api.document.jobs.require_knowledge_ready", lambda _: None)
     release, guard = Event(), Lock()
     running = maximum = finished = 0
 
@@ -155,11 +153,11 @@ def test_background_entry_failure_can_recover(
     settings = Settings(database_url="postgresql+psycopg://unused", document_upload_dir=tmp_path)
     app = create_app(settings)
     with TestClient(app) as client:
-        documents = DocumentService(store_engine, tmp_path, "local-demo")
+        documents = DocumentService(store_engine, tmp_path, "knowledge-base")
         identifier = documents.upload(
             BytesIO(b"entry-failure"), "entry.txt", "text/plain",
         ).document.id
-        jobs = DocumentJobService(store_engine, "local-demo")
+        jobs = DocumentJobService(store_engine, "knowledge-base")
         job, _ = jobs.start(identifier, "index")
 
         """断线替代函数：代表后台执行入口无法借到数据库连接。"""
@@ -186,6 +184,7 @@ def test_lazy_recovery_only_runs_once(monkeypatch: pytest.MonkeyPatch) -> None:
 
     from app.api.document.jobs import get_job_service
 
+    monkeypatch.setattr("app.api.document.jobs.require_knowledge_ready", lambda _: None)
     entered, release = Event(), Event()
     calls = []
 

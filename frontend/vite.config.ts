@@ -9,13 +9,14 @@ export default defineConfig({
     host: '127.0.0.1',
     port: 5173,
     strictPort: true,
-    proxy: { '/api': 'http://127.0.0.1:8000' },
+    // 保留浏览器访问的Host，后端才能核对Origin并拒绝跨站写请求。
+    proxy: { '/api': { target: 'http://127.0.0.1:8000', changeOrigin: false } },
   },
   // 预览打包结果时也可连接本地后端；正式部署需要配置同源反向代理。
   preview: {
     host: '127.0.0.1',
     port: 4173,
     strictPort: true,
-    proxy: { '/api': 'http://127.0.0.1:8000' },
+    proxy: { '/api': { target: 'http://127.0.0.1:8000', changeOrigin: false } },
   },
 })

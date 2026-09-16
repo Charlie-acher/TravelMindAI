@@ -16,12 +16,12 @@ CITIES = (
 ).split()
 
 
-"""标签识别函数：文件名和城市字段有冲突时留空，来源只取明确名称，审核交给人工。"""
+"""标签识别函数：只从文件名和明确标注提取城市及三类业务类别。"""
 
 def infer_metadata(file_name: str, sections: list[ParsedSection]) -> DocumentMetadata:
     stem = Path(file_name).stem
     cities = {city for city in CITIES if city in stem}
-    sources: set[str] = set()
+    categories = {category for category in ("住宿", "景点", "餐馆") if category in stem}
     # 正文只认独立标注行，不把“出发城市”或普通段落里的城市当作资料归属。
     for section in sections:
         for line in section.text.splitlines():
@@ -29,15 +29,10 @@ def infer_metadata(file_name: str, sections: list[ParsedSection]) -> DocumentMet
             match = re.fullmatch(r"(?:城市|city)\s*[:：]\s*([\u4e00-\u9fff]{2,12})", line, re.I)
             if match:
                 cities.add(match[1].removesuffix("市"))
-            match = re.fullmatch(r"(?:来源|source)\s*[:：]\s*(.{1,255})", line, re.I)
+            match = re.fullmatch(r"(?:类别|category)\s*[:：]\s*(住宿|景点|餐馆)", line, re.I)
             if match:
-                sources.add(match[1].strip())
-    if not sources:
-        for source in ("ChinaTravel", "LvBanGPT"):
-            if source.lower() in stem.lower():
-                sources.add(source)
+                categories.add(match[1])
     return DocumentMetadata(
         city=next(iter(cities)) if len(cities) == 1 else None,
-        source=next(iter(sources)) if len(sources) == 1 else None,
-        review_status="pending",
+        category=next(iter(categories)) if len(categories) == 1 else None,
     )

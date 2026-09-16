@@ -11,19 +11,24 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class DocumentMetadata(BaseModel):
-    """资料元数据类：保存预填写或人工修改的城市、来源、审核状态和外部POI编号。"""
+    """资料元数据类：保存预填写或人工修改的城市和业务类别。"""
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
     city: str | None = Field(default=None, max_length=100)
-    source: str | None = Field(default=None, max_length=255)
-    review_status: Literal["pending", "approved", "rejected"] | None = None
-    poi_id: str | None = Field(default=None, max_length=100)  # 外部地点编号，不代表坐标已核验。
+    category: Literal["住宿", "景点", "餐馆"] | None = None
 
-    """空值整理函数：空白表示未标注，不自动猜测城市、来源或审核结论。"""
+    """城市整理函数：去除空白和末尾的市，空值表示未标注。"""
 
-    @field_validator("city", "source", "review_status", "poi_id", mode="before")
+    @field_validator("city", mode="before")
     @classmethod
-    def blank_to_none(cls, value: object) -> object:
+    def normalize_city(cls, value: object) -> object:
+        return value.strip().removesuffix("市").strip() or None if isinstance(value, str) else value
+
+    """类别整理函数：空白表示未分类。"""
+
+    @field_validator("category", mode="before")
+    @classmethod
+    def blank_category(cls, value: object) -> object:
         return value.strip() or None if isinstance(value, str) else value
 
 
@@ -64,6 +69,26 @@ class DocumentDetail(DocumentSummary):
     """资料详情类：在摘要信息上增加正文，供前端预览。"""
 
     sections: list[ParsedSection]  # 读取失败时为空列表，原因在error_message中。
+
+
+class DocumentCityCount(BaseModel):
+    """城市数量类：记录筛选后一个城市内的文件总数。"""
+
+    city: str | None
+    total: int = Field(ge=0)
+
+
+class DocumentCityCounts(BaseModel):
+    """城市分组类：返回所有匹配城市及文件数量。"""
+
+    items: list[DocumentCityCount]
+
+
+class DocumentCursorPage(BaseModel):
+    """资料游标分页类：返回一页文件及下一页位置。"""
+
+    items: list[DocumentSummary]
+    next_cursor: str | None
 
 
 class DocumentUploadResult(BaseModel):

@@ -15,6 +15,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models.trip import Itinerary, TravelRequest, TravelSession
+from tests.helpers import TEST_USER_ID
 
 pytestmark = pytest.mark.postgres
 
@@ -25,7 +26,7 @@ def test_save_and_read_using_new_store(store_engine: Engine) -> None:
     from app.services.trip_service import TripService
 
     store = TripService(store_engine)
-    trip = store.create_session("  杭州三日游  ")
+    trip = store.create_session("  杭州三日游  ", user_id=TEST_USER_ID)
     saved = store.save_draft(
         trip.id,
         request_json={"days": 3, "total_budget": "5000.01"},
@@ -53,7 +54,8 @@ def test_versions_and_sessions_are_isolated(store_engine: Engine) -> None:
     from app.services.trip_service import TripService
 
     store = TripService(store_engine)
-    first, second = store.create_session("甲"), store.create_session("乙")
+    first = store.create_session("甲", user_id=TEST_USER_ID)
+    second = store.create_session("乙", user_id=TEST_USER_ID)
     for destination in ["杭州", "苏州"]:
         store.save_draft(first.id, request_json={"destination": destination}, itinerary_json={})
     other = store.save_draft(second.id, request_json={"destination": "北京"}, itinerary_json={})
@@ -76,7 +78,7 @@ def test_failed_draft_rolls_back_requirement_and_timestamp(store_engine: Engine)
     from app.services.trip_service import TripService
 
     store = TripService(store_engine)
-    trip = store.create_session("回滚测试")
+    trip = store.create_session("回滚测试", user_id=TEST_USER_ID)
     # JSON 数组可以被驱动序列化，但会违反表的“必须为对象”约束。
     # 故意越过类型提示，模拟存储调用方的程序错误，不修改生产代码来制造失败。
     with pytest.raises(IntegrityError):
@@ -106,7 +108,7 @@ def test_invalid_title_is_rejected(store_engine: Engine, title: str) -> None:
     from app.services.trip_service import TripService
 
     with pytest.raises(ValueError):
-        TripService(store_engine).create_session(title)
+        TripService(store_engine).create_session(title, user_id=TEST_USER_ID)
     with Session(store_engine) as reader:
         assert reader.scalar(select(func.count()).select_from(TravelSession)) == 0
 
@@ -117,7 +119,7 @@ def test_concurrent_saves_allocate_distinct_versions(store_engine: Engine) -> No
     from app.services.trip_service import TripService
 
     store = TripService(store_engine)
-    trip = store.create_session("并发测试")
+    trip = store.create_session("并发测试", user_id=TEST_USER_ID)
     ready = Barrier(2)
 
     """两个任务就绪后一起调用；TripService 内部必须为每次调用创建独立 Session。"""
@@ -144,7 +146,7 @@ def test_saved_snapshot_does_not_share_input_dictionaries(store_engine: Engine) 
     from app.services.trip_service import TripService
 
     store = TripService(store_engine)
-    trip = store.create_session("快照隔离")
+    trip = store.create_session("快照隔离", user_id=TEST_USER_ID)
     content = {"activities": ["西湖"]}
     saved = store.save_draft(trip.id, request_json={}, itinerary_json=content)
     content["activities"].append("修改后的值")
@@ -175,7 +177,7 @@ def test_demo_can_save_then_read_in_another_process(
         f"TRAVELMIND_DATABASE_URL={store_engine.url.render_as_string(hide_password=False)}\n",
         encoding="utf-8",
     )
-    assert main(["--env-file", str(config_file)]) == 0
+    assert main(["--env-file", str(config_file), "--user-id", str(TEST_USER_ID)]) == 0
     saved = json.loads(capsys.readouterr().out)
     assert saved["version"] == 1
     assert saved["budget"]["total"] == "2442.00"

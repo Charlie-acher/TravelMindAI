@@ -9,7 +9,7 @@
 <text x="50" y="157" font-size="21" fill="#5c6f86" style="fill:#5c6f86" font-weight="700" text-anchor="start">01  使用入口</text>
 <g data-box="50,175,640,115"><rect x="50" y="175" width="640" height="115" rx="10" fill="#ffffff" stroke="#a9cdd7" stroke-width="1.7"/>
 <text x="70" y="211" font-size="24" fill="#197a94" style="fill:#197a94" font-weight="700" text-anchor="start">Vue 3 旅行页面</text>
-<text x="70" y="245" font-size="21" fill="#3e5168" style="fill:#3e5168" font-weight="400" text-anchor="start">M2 旅行对话   ·   M3 资料标签 / 后台任务</text>
+<text x="70" y="245" font-size="21" fill="#3e5168" style="fill:#3e5168" font-weight="400" text-anchor="start">首问登录 / 流式对话 · 管理员资料库</text>
 </g>
 <g data-box="720,175,330,115"><rect x="720" y="175" width="330" height="115" rx="10" fill="#ffffff" stroke="#a9cdd7" stroke-width="1.7"/>
 <text x="740" y="211" font-size="24" fill="#197a94" style="fill:#197a94" font-weight="700" text-anchor="start">接口文档 / 命令脚本</text>
@@ -19,7 +19,7 @@
 <rect x="30" y="360" width="1040" height="150" rx="14" fill="#eef2f7" stroke="#d5dfeb"/>
 <text x="50" y="392" font-size="21" fill="#5c6f86" style="fill:#5c6f86" font-weight="700" text-anchor="start">02  HTTP接口层 · FastAPI</text>
 <g data-box="50,408,1000,80"><rect x="50" y="408" width="1000" height="80" rx="10" fill="#ffffff" stroke="#a9cdd7" stroke-width="1.7"/>
-<text x="70" y="444" font-size="24" fill="#197a94" style="fill:#197a94" font-weight="700" text-anchor="start">预算 / 会话 / 需求对话 / 资料标签 / 后台任务 / 索引与搜索</text>
+<text x="70" y="444" font-size="24" fill="#197a94" style="fill:#197a94" font-weight="700" text-anchor="start">身份认证 / 会话归属 / 管理员授权 / 预算 / SSE聊天 / 资料处理</text>
 </g>
 <path d="M550,510 L550,550" fill="none" stroke="#899db5" stroke-width="2" marker-end="url(#arrow)"/>
 <rect x="30" y="555" width="1040" height="290" rx="14" fill="#eef2f7" stroke="#d5dfeb"/>
@@ -27,21 +27,21 @@
 <g data-box="50,607,310,212"><rect x="50" y="607" width="310" height="212" rx="10" fill="#ffffff" stroke="#b1d6c8" stroke-width="1.7"/>
 <text x="70" y="643" font-size="24" fill="#238366" style="fill:#238366" font-weight="700" text-anchor="start">M1 预算与草稿</text>
 <text x="70" y="677" font-size="21" fill="#3e5168" style="fill:#3e5168" font-weight="400" text-anchor="start">固定规则预算估算</text>
-<text x="70" y="708" font-size="21" fill="#3e5168" style="fill:#3e5168" font-weight="400" text-anchor="start">旅行会话创建与读取</text>
+<text x="70" y="708" font-size="21" fill="#3e5168" style="fill:#3e5168" font-weight="400" text-anchor="start">账号归属 / 会话历史分页</text>
 <text x="70" y="739" font-size="21" fill="#3e5168" style="fill:#3e5168" font-weight="400" text-anchor="start">草稿保存、版本管理</text>
 </g>
 <g data-box="395,607,310,212"><rect x="395" y="607" width="310" height="212" rx="10" fill="#ffffff" stroke="#b8cee7" stroke-width="1.7"/>
 <text x="415" y="643" font-size="24" fill="#346cb2" style="fill:#346cb2" font-weight="700" text-anchor="start">M2 需求对话</text>
 <text x="415" y="677" font-size="21" fill="#3e5168" style="fill:#3e5168" font-weight="400" text-anchor="start">DeepSeek提取条件</text>
 <text x="415" y="708" font-size="21" fill="#3e5168" style="fill:#3e5168" font-weight="400" text-anchor="start">本地校验、多轮合并</text>
-<text x="415" y="739" font-size="21" fill="#3e5168" style="fill:#3e5168" font-weight="400" text-anchor="start">补问、历史保存与恢复</text>
+<text x="415" y="739" font-size="21" fill="#3e5168" style="fill:#3e5168" font-weight="400" text-anchor="start">自然补问 / SSE与整轮保存</text>
 </g>
 <g data-box="740,607,310,212"><rect x="740" y="607" width="310" height="212" rx="10" fill="#ffffff" stroke="#cec0e1" stroke-width="1.7"/>
 <text x="760" y="643" font-size="24" fill="#7956a8" style="fill:#7956a8" font-weight="700" text-anchor="start">M3 知识库与RAG</text>
 <text x="760" y="677" font-size="20" fill="#3e5168" style="fill:#3e5168" font-weight="400" text-anchor="start">上传、预填、自动分段</text>
 <text x="760" y="708" font-size="20" fill="#3e5168" style="fill:#3e5168" font-weight="400" text-anchor="start">向量索引与原文检索</text>
-<text x="760" y="739" font-size="20" fill="#3e5168" style="fill:#3e5168" font-weight="400" text-anchor="start">证据回答、景点卡片与定位</text>
-<text x="760" y="771" font-size="17" style="fill:#3e5168">城市/来源/审核/POI先筛候选</text>
+<text x="760" y="739" font-size="20" fill="#3e5168" style="fill:#3e5168" font-weight="400" text-anchor="start">证据回答 / 景点与餐饮分支</text>
+<text x="760" y="771" font-size="17" style="fill:#3e5168">城市 / 类别先筛候选</text>
 <text x="760" y="801" font-size="18" style="fill:#3e5168">自动索引，同时两份；失败可续建</text>
 </g>
 <path d="M550,845 L550,890" fill="none" stroke="#899db5" stroke-width="2" marker-end="url(#arrow)"/>
@@ -58,17 +58,17 @@
 </g>
 <g data-box="740,945,310,94"><rect x="740" y="945" width="310" height="94" rx="10" fill="#ffffff" stroke="#dfcbaa" stroke-width="1.7"/>
 <text x="760" y="981" font-size="24" fill="#a47225" style="fill:#a47225" font-weight="700" text-anchor="start">高德 / Tavily工具</text>
-<text x="760" y="1015" font-size="19" fill="#3e5168" style="fill:#3e5168" font-weight="400" text-anchor="start">地图定位 / 网页补证，需Key</text>
+<text x="760" y="1015" font-size="19" fill="#3e5168" style="fill:#3e5168" font-weight="400" text-anchor="start">地点与餐饮 / 网页补证，需Key</text>
 </g>
 <g data-box="50,1059,310,115"><rect x="50" y="1059" width="310" height="115" rx="10" fill="#ffffff" stroke="#cec0e1" stroke-width="1.7"/>
 <text x="70" y="1095" font-size="24" fill="#7956a8" style="fill:#7956a8" font-weight="700" text-anchor="start">PostgreSQL</text>
-<text x="70" y="1129" font-size="17" fill="#3e5168" style="fill:#3e5168" font-weight="400" text-anchor="start">会话/需求/草稿/正文/片段/快照</text>
+<text x="70" y="1129" font-size="17" fill="#3e5168" style="fill:#3e5168" font-weight="400" text-anchor="start">账号 / 登录态 / 私人会话 / 资料</text>
 <text x="70" y="1160" font-size="18" fill="#3e5168" style="fill:#3e5168" font-weight="400" text-anchor="start">资料标签 / document_jobs</text>
 </g>
 <g data-box="395,1059,310,115"><rect x="395" y="1059" width="310" height="115" rx="10" fill="#ffffff" stroke="#cec0e1" stroke-width="1.7"/>
 <text x="415" y="1095" font-size="24" fill="#7956a8" style="fill:#7956a8" font-weight="700" text-anchor="start">Milvus</text>
 <text x="415" y="1129" font-size="18" fill="#3e5168" style="fill:#3e5168" font-weight="400" text-anchor="start">向量与片段编号</text>
-<text x="415" y="1160" font-size="18" fill="#3e5168" style="fill:#3e5168" font-weight="400" text-anchor="start">按归属与候选资料编号搜索</text>
+<text x="415" y="1160" font-size="18" fill="#3e5168" style="fill:#3e5168" font-weight="400" text-anchor="start">knowledge-base / 候选编号</text>
 </g>
 <g data-box="740,1059,310,115"><rect x="740" y="1059" width="310" height="115" rx="10" fill="#ffffff" stroke="#cec0e1" stroke-width="1.7"/>
 <text x="760" y="1095" font-size="24" fill="#7956a8" style="fill:#7956a8" font-weight="700" text-anchor="start">本地文件</text>
@@ -76,6 +76,6 @@
 <text x="760" y="1160" font-size="18" fill="#3e5168" style="fill:#3e5168" font-weight="400" text-anchor="start">与数据库资料记录关联</text>
 </g>
 <text x="44" y="1224" font-size="19" fill="#5c6f86" style="fill:#5c6f86" font-weight="400" text-anchor="start">当前边界：M1使用固定演示价格；聊天不会自动计算预算或生成每日行程。</text>
-<text x="44" y="1253" font-size="19" fill="#5c6f86" style="fill:#5c6f86" font-weight="400" text-anchor="start">主聊天由M2与M3共同完成；知识回答必须经过RAG，地图与搜索未配置时不会实际请求。</text>
-<text x="44" y="1282" font-size="18" class="sub">资料标签迁移0006；后台任务迁移0007。页面关闭继续，启动识别中断，失败须显式重试。</text>
+<text x="44" y="1253" font-size="19" fill="#5c6f86" style="fill:#5c6f86" font-weight="400" text-anchor="start">普通旅行知识走RAG；附近餐饮直接查高德。公开草稿校验并保存后才成为正式回答。</text>
+<text x="44" y="1282" font-size="18" class="sub">迁移0008–0010：账号、资料类别、会话归属。后台任务关闭页面继续，失败须显式重试。</text>
 </svg>

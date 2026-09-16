@@ -34,7 +34,7 @@ def test_document_dry_run(
 ):
     from scripts import demo_embedding
 
-    service = DocumentService(store_engine, tmp_path, "local-demo")
+    service = DocumentService(store_engine, tmp_path, "knowledge-base")
     saved = service.upload(BytesIO(("西湖" * 1000).encode()), "杭州.txt", "text/plain")
     chunks = service.generate_chunks(saved.document.id)
     monkeypatch.setattr(demo_embedding, "create_database_engine", lambda settings: store_engine)

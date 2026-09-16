@@ -7,6 +7,7 @@ from sqlalchemy import Engine, select
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.api.errors import error_response
+from app.models.auth import AuthSession, User
 from app.models.document import DocumentChunkRecord, DocumentRecord
 from app.models.document_job import DocumentJobRecord
 from app.models.requirement_turn import RequirementTurn
@@ -40,7 +41,7 @@ def ready(request: Request) -> dict[str, object] | JSONResponse:
             with engine.connect() as connection:
                 for model in [
                     TravelSession, TravelRequest, Itinerary, RequirementTurn, DocumentRecord,
-                    DocumentChunkRecord, DocumentJobRecord,
+                    DocumentChunkRecord, DocumentJobRecord, User, AuthSession,
                 ]:
                     # LIMIT 0 校验表与映射字段存在，但不返回任何会话或草稿记录。
                     connection.execute(select(model).limit(0))

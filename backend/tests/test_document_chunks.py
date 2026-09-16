@@ -6,7 +6,6 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
-from fastapi.testclient import TestClient
 from sqlalchemy import Engine
 
 from app.api.document.routes import get_document_service
@@ -14,6 +13,7 @@ from app.config import Settings
 from app.main import create_app
 from app.schemas.document.base import ParsedSection
 from app.services.document.service import DocumentService
+from tests.helpers import authenticated_client as TestClient
 
 """切分测试函数：长文字不得丢失，重叠和位置必须能对回原文。"""
 

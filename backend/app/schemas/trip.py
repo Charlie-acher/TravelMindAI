@@ -15,7 +15,7 @@ class SessionCreate(BaseModel):
     """会话创建请求类：接收新会话的标题。"""
 
     # 去掉首尾空白后检查长度，规则与 TripService.create_session 一致。
-    title: str = Field(min_length=1, max_length=200, examples=["杭州三日游"])
+    title: str = Field(default="新建对话", min_length=1, max_length=200, examples=["杭州三日游"])
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
 
@@ -96,6 +96,13 @@ class SessionResponse(BaseModel):
 
     session: SessionView  # 会话数据。
     request_id: str  # 本次 HTTP 请求编号，与响应头 X-Request-ID 相同。
+
+
+class SessionPage(BaseModel):
+    """历史分页类：返回当前账号会话和下一页游标。"""
+
+    items: list[SessionView]
+    next_cursor: str | None
 
 
 class DraftResponse(BaseModel):

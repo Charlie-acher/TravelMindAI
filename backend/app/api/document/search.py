@@ -38,6 +38,6 @@ def build_index(document_id: UUID, service: SearchDependency) -> IndexProgress:
 @router.post("/document-search", response_model=SearchResult)
 def search_documents(body: SearchRequest, service: SearchDependency) -> SearchResult:
     metadata = DocumentMetadata.model_validate(body.model_dump(include={
-        "city", "source", "review_status", "poi_id",
+        "city", "category",
     }))
     return service.search(body.query, body.limit, body.document_id, metadata=metadata)

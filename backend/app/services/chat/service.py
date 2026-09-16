@@ -11,6 +11,8 @@ from uuid import UUID
 from app.schemas.requirement.chat import RequirementChatResponse, RequirementMessage
 from app.schemas.requirement.history import SavedRequirementMessage, SavedRequirementTurn
 from app.services.amap import AmapClient
+from app.services.chat.dining import dining_reply, handle_dining
+from app.services.chat.events import progress
 from app.services.chat.rag import build_chat_context, ground_chat_response
 from app.services.document.search import DocumentSearchService
 from app.services.document.search import search_context as document_topic
@@ -59,7 +61,7 @@ def build_requirement_response(
         reply = result.clarification
     else:
         status = "complete"
-        reply = "旅行需求已整理完整。你可以继续修改条件，右侧会显示最新需求。"
+        reply = "旅行需求已记好了。接下来可以聊聊你想逛的地方、喜欢的玩法，或者继续调整条件。"
     return RequirementChatResponse(
         result=result,
         reply=reply,
@@ -81,6 +83,7 @@ def process_saved_message(
     search_context: AbstractContextManager[DocumentSearchService], maps: AmapClient,
     web: WebSearchClient | None = None,
 ) -> SavedRequirementTurn:
+    progress("history", "正在读取这段对话，接上你刚才的想法")
     history = service.read(session_id)
     # 已提交但浏览器没收到响应时，重试直接返回原结果，不再次调用模型。
     for turn in history.turns:
@@ -104,6 +107,7 @@ def process_saved_message(
     )
     reference_date = history.turns[0].response.result.reference_date if history.turns else None
     # 两种HTTP入口都调用同一业务函数，采用相同的抽取、追问和变化字段规则。
+    progress("requirements", "正在理解目的地和旅行偏好")
     response = build_requirement_response(
         RequirementMessage(
             message=payload.message, previous=previous, reference_date=reference_date
@@ -119,15 +123,24 @@ def process_saved_message(
             and not any(word in payload.message for word in ("规划", "行程", "安排"))
             and response.result.extraction.days is None):
         response = response.model_copy(update={"status": "unsupported", "changed_fields": []})
-    # 每轮主聊天必须走检索；不配置或检索失败时禁止退回自由回答。
-    # 放在幂等检查之后，已保存消息的重试无需再次访问知识库。
+    # 餐饮直接核对地图，其余问题检索知识库；任何分支都不降级为无依据的自由回答。
+    # 放在幂等检查之后，已保存消息的重试无需再次访问外部工具。
     destination = response.result.extraction.destination or (
         previous.destination if previous else None
     )
-    with search_context as search:
-        response = ground_chat_response(
-            response, search, model, destination, context,
-            maps=maps, web=web,
-        )
+    dining = handle_dining(payload.message, destination, history.turns, maps)
+    if dining is not None:
+        response = response.model_copy(update={
+            "reply": dining_reply(dining), "dining": dining,
+            "status": "knowledge", "changed_fields": [],
+        })
+    else:
+        progress("search", "正在查找与这次问题相关的旅行资料")
+        with search_context as search:
+            response = ground_chat_response(
+                response, search, model, destination, context,
+                maps=maps, web=web,
+            )
     # 等待模型时没有持有数据库事务；这里再锁行检查，处理两个页面同时发消息。
+    progress("save", "回答已核对，正在保存这轮对话")
     return service.append(session_id, payload.message_id, payload.expected_revision, response)

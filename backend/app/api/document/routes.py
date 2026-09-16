@@ -3,7 +3,7 @@ HTTP接口层：接收前端的资料上传和查询请求，调用资料业务�
 这些同步接口由FastAPI在线程池中执行，避免读文件时阻塞其他异步请求。
 """
 
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID
 
 import httpx
@@ -20,9 +20,12 @@ from fastapi import (
 from sqlalchemy import Engine
 from sqlalchemy.exc import SQLAlchemyError
 
+from app.api.auth import CurrentUser
 from app.api.document.jobs import get_job_service, run_queued_job
 from app.schemas.document.base import (
     DocumentChunkPage,
+    DocumentCityCounts,
+    DocumentCursorPage,
     DocumentDetail,
     DocumentMetadata,
     DocumentSummary,
@@ -31,6 +34,7 @@ from app.schemas.document.base import (
 from app.services.document.metadata import infer_metadata
 from app.services.document.service import DocumentService
 from app.services.document.vector_store import MilvusStore
+from app.services.knowledge_scope import KNOWLEDGE_SCOPE, require_knowledge_ready
 
 router = APIRouter(prefix="/documents", tags=["旅行资料"])
 
@@ -39,11 +43,11 @@ router = APIRouter(prefix="/documents", tags=["旅行资料"])
 
 
 def get_document_service(request: Request) -> DocumentService:
+    require_knowledge_ready(request)
     engine: Engine | None = request.app.state.database_engine
     if engine is None:
         raise HTTPException(503, "未启用数据库，请配置数据库后重启服务")
-    # 当前由后端固定使用本地演示归属，前端不能传入其他用户的归属。
-    return DocumentService(engine, request.app.state.settings.document_upload_dir, "local-demo")
+    return DocumentService(engine, request.app.state.settings.document_upload_dir, KNOWLEDGE_SCOPE)
 
 
 # 接口参数使用这个类型时，FastAPI会先调用上面的函数准备资料服务。
@@ -60,10 +64,12 @@ def upload_document(
     service: DocumentDependency,
     request: Request,
     tasks: BackgroundTasks,
+    user: CurrentUser,
     auto_process: bool = False,
 ) -> DocumentUploadResult:
     try:
-        result = service.upload(file.file, file.filename or "", file.content_type or "")
+        result = service.upload(file.file, file.filename or "", file.content_type or "",
+                                uploaded_by=user.id)
     finally:
         # 处理结束后关闭上传临时文件，出错时也要关闭。
         file.file.close()
@@ -94,6 +100,37 @@ def list_documents(
     q: Annotated[str, Query(max_length=255)] = "",
 ) -> list[DocumentSummary]:
     return service.list(limit, offset, q, metadata)
+
+
+"""城市数量接口函数：按文件名、城市和类别统计全部匹配文件。"""
+
+@router.get("/cities", response_model=DocumentCityCounts)
+def list_document_cities(
+    service: DocumentDependency,
+    q: Annotated[str, Query(max_length=255)] = "",
+    city: Annotated[str | None, Query(max_length=100)] = None,
+    category: Literal["住宿", "景点", "餐馆"] | None = None,
+    unclassified_city: bool = False,
+) -> DocumentCityCounts:
+    return DocumentCityCounts(items=service.city_counts(
+        q, city, category, unclassified_city=unclassified_city,
+    ))
+
+
+"""资料分页接口函数：按固定排序返回一页文件和下一页位置。"""
+
+@router.get("/page", response_model=DocumentCursorPage)
+def page_documents(
+    service: DocumentDependency,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    cursor: Annotated[str | None, Query(max_length=512)] = None,
+    q: Annotated[str, Query(max_length=255)] = "",
+    city: Annotated[str | None, Query(max_length=100)] = None,
+    category: Literal["住宿", "景点", "餐馆"] | None = None,
+    unclassified_city: bool = False,
+) -> DocumentCursorPage:
+    return service.page(limit, cursor, q, city, category,
+                        unclassified_city=unclassified_city)
 
 
 """标签修改接口函数：按资料归属更新人工标签，未传字段保留，显式空值清除。"""

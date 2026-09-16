@@ -9,7 +9,6 @@ from uuid import uuid4
 import httpx
 import pytest
 from fastapi import HTTPException
-from fastapi.testclient import TestClient
 from sqlalchemy import Engine, func, select
 
 from app.api.document.routes import get_document_service
@@ -19,6 +18,7 @@ from app.models.document import DocumentChunkRecord, DocumentRecord
 from app.services.document.search import DocumentSearchService
 from app.services.document.service import DocumentService
 from app.services.document.vector_store import MilvusError
+from tests.helpers import authenticated_client as TestClient
 
 """删除重试测试函数：向量故障后先停用资料，重建服务后仍能清理全部内容。"""
 
@@ -145,6 +145,14 @@ def test_delete_migration_round_trip(store_engine: Engine, tmp_path: Path):
     config = Config(toml_file=str(Path(__file__).resolve().parents[1] / "pyproject.toml"))
     with store_engine.connect() as connection:
         config.attributes["connection"] = connection
+        # 本用例不测账号，移除fixture的唯一测试账号后才演练旧版回滚。
+        from sqlalchemy import delete
+
+        from app.models.auth import User
+        from tests.helpers import TEST_USER_ID
+
+        connection.execute(delete(User).where(User.id == TEST_USER_ID))
+        connection.commit()
         command.downgrade(config, "0004_document_chunks")
         command.upgrade(config, "head")
         command.check(config)

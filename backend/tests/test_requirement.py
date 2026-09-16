@@ -65,7 +65,10 @@ def test_missing_fields_are_computed_together(complete_payload: dict[str, object
     )
     assert result.missing_required_fields == ["days", "travelers", "total_budget"]
     assert result.extraction.total_budget is None
-    assert result.clarification == "请一起补充：旅行日期或天数、出行人数、全团人民币总预算。"
+    assert result.clarification == (
+        "这次准备几个人一起去，大概想玩几天，整趟旅行的总预算大约多少元？"
+        "还没想好也没关系，可以先说个大概。"
+    )
 
 
 """明确的首尾日期可以算出天数，含出发和返回当天，并记录这次推导。"""

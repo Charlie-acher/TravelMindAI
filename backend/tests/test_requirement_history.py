@@ -12,6 +12,7 @@ from app.schemas.requirement.chat import RequirementChatResponse
 from app.services.requirement.extract import build_result
 from app.services.requirement.history import HistoryConflictError, RequirementHistoryService
 from app.services.trip_service import SessionNotFoundError, TripService
+from tests.helpers import TEST_USER_ID
 
 """创建有效但不完整的需求，用于证明保存不依赖必需字段全部填满。"""
 
@@ -47,7 +48,8 @@ def chat_response(message: str = "想去杭州") -> RequirementChatResponse:
 
 def test_history_survives_new_service_and_isolates_sessions(store_engine: Engine) -> None:
     trips = TripService(store_engine)
-    first, second = trips.create_session("第一趟"), trips.create_session("第二趟")
+    first = trips.create_session("第一趟", user_id=TEST_USER_ID)
+    second = trips.create_session("第二趟", user_id=TEST_USER_ID)
     history = RequirementHistoryService(store_engine)
     source = chat_response()
     saved = history.append(first.id, uuid4(), 0, source)
@@ -64,7 +66,7 @@ def test_history_survives_new_service_and_isolates_sessions(store_engine: Engine
 """相同消息编号重试不重复写入；编号被用于不同原话或旧版本写入时明确拒绝。"""
 
 def test_retry_and_stale_revision(store_engine: Engine) -> None:
-    session = TripService(store_engine).create_session("重试")
+    session = TripService(store_engine).create_session("重试", user_id=TEST_USER_ID)
     history = RequirementHistoryService(store_engine)
     message_id = uuid4()
     first = history.append(session.id, message_id, 0, chat_response())
@@ -80,7 +82,7 @@ def test_retry_and_stale_revision(store_engine: Engine) -> None:
 """两个请求都依据第0轮，只允许一个成功，另一个不能覆盖刚保存的结果。"""
 
 def test_concurrent_stale_write_is_rejected(store_engine: Engine) -> None:
-    session = TripService(store_engine).create_session("并发")
+    session = TripService(store_engine).create_session("并发", user_id=TEST_USER_ID)
     history = RequirementHistoryService(store_engine)
 
     """把业务冲突变为可比较结果，其他异常仍然让测试失败。"""
@@ -110,7 +112,7 @@ def test_missing_history_session(store_engine: Engine) -> None:
 """INSERT已经发出后模拟故障，整个事务回滚；再次保存仍然从第1轮开始。"""
 
 def test_insert_failure_rolls_back_whole_turn(store_engine: Engine) -> None:
-    trip = TripService(store_engine).create_session("事务回滚")
+    trip = TripService(store_engine).create_session("事务回滚", user_id=TEST_USER_ID)
     history = RequirementHistoryService(store_engine)
 
     """只在本测试的新表INSERT后抛错，不影响其他SQL或真实业务schema。"""

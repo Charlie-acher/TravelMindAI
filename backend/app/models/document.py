@@ -46,10 +46,11 @@ class DocumentRecord(Base):
             "review_status IN ('pending', 'approved', 'rejected')",
             name="ck_documents_review_status",
         ),
+        CheckConstraint("category IN ('住宿', '景点', '餐馆')", name="ck_documents_category"),
     )
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)  # 自动生成的资料主键。
-    # 首版由服务端固定注入local-demo，不能从HTTP参数指定；尚不代表账号认证。
+    # 运行时固定为knowledge-base；旧local-demo记录必须先完成部署迁移。
     owner_id: Mapped[str] = mapped_column(String(100))
     file_name: Mapped[str] = mapped_column(String(255))  # 仅展示的原文件名，已剥离目录。
     storage_name: Mapped[str] = mapped_column(String(50), unique=True)  # 磁盘文件名：UUID加扩展名。
@@ -57,9 +58,14 @@ class DocumentRecord(Base):
     content_hash: Mapped[str] = mapped_column(String(64))  # 内容指纹SHA-256，用来检查重复。
     size_bytes: Mapped[int]  # 文件大小，单位为字节。
     city: Mapped[str | None] = mapped_column(String(100))  # 人工填写的城市，未标注为空。
-    source: Mapped[str | None] = mapped_column(String(255))  # 来源名称或链接，不推断可信度。
-    review_status: Mapped[str | None] = mapped_column(String(20))  # 人工审核状态，未标注为空。
-    poi_id: Mapped[str | None] = mapped_column(String(100))  # 可选外部地点编号，尚无POI表外键。
+    category: Mapped[str | None] = mapped_column(String(20))  # 住宿、景点、餐馆，未分类为空。
+    uploaded_by: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", name="fk_documents_uploaded_by_users", ondelete="SET NULL")
+    )  # 历史资料无法确定上传者时为空。
+    # 旧标签只作迁移备份，不再供API、筛选或页面使用；地图证据仍保留。
+    source: Mapped[str | None] = mapped_column(String(255))
+    review_status: Mapped[str | None] = mapped_column(String(20))
+    poi_id: Mapped[str | None] = mapped_column(String(100))
     # parsed已读取，failed读取失败，deleting已停用待清理。
     status: Mapped[str] = mapped_column(String(20))
     error_message: Mapped[str | None] = mapped_column(String(500))  # 失败或待清理说明。

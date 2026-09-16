@@ -1,5 +1,5 @@
 <script setup lang="ts">
-/** 表单组件层：资料编辑和筛选共用标签输入框，预填值来自后端，不猜测地图编号。 */
+/** 表单组件层：资料编辑和筛选只使用城市、类别两个业务标签。 */
 import type { DocumentMetadata } from '../api/documents'
 
 defineProps<{ disabled?: boolean; filtering?: boolean }>()
@@ -10,12 +10,8 @@ const metadata = defineModel<DocumentMetadata>({ required: true })
   <fieldset :disabled="disabled" class="metadata-fields">
     <legend>{{ filtering ? '按已填写标签精确筛选' : '资料标签（可修改）' }}</legend>
     <label>城市<input v-model="metadata.city" maxlength="100" placeholder="如：杭州" /></label>
-    <label>来源<input v-model="metadata.source" maxlength="255" placeholder="来源名称或链接" /></label>
-    <label>审核状态<select v-model="metadata.review_status">
-      <option :value="null">{{ filtering ? '不限' : '未标注' }}</option>
-      <option value="pending">待审核</option><option value="approved">已通过</option><option value="rejected">未通过</option>
-    </select></label>
-    <label>POI编号（可选）<input v-model="metadata.poi_id" maxlength="100" placeholder="单个地点的地图编号，多地点资料留空" /></label>
+    <label>类别<select v-model="metadata.category"><option :value="null">{{ filtering ? '不限' : '未分类' }}</option>
+      <option value="住宿">住宿</option><option value="景点">景点</option><option value="餐馆">餐馆</option></select></label>
   </fieldset>
 </template>
 

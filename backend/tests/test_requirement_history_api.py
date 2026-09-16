@@ -4,7 +4,6 @@ from unittest.mock import Mock
 from uuid import uuid4
 
 import pytest
-from fastapi.testclient import TestClient
 from sqlalchemy import Engine
 
 from app.api.requirement.history import get_history_service, get_saved_model
@@ -13,7 +12,8 @@ from app.main import create_app
 from app.schemas.document.search import SearchResult
 from app.services.requirement.history import RequirementHistoryService
 from app.services.trip_service import TripService
-from tests.helpers import FakeModel, answer
+from tests.helpers import TEST_USER_ID, FakeModel, answer
+from tests.helpers import authenticated_client as TestClient
 
 """空知识库替身函数：M2回归仍走RAG调用链，但无证据时不额外消耗假模型输出。"""
 
@@ -42,8 +42,8 @@ def message(text: str, revision: int = 0) -> dict[str, object]:
 
 def test_refresh_continue_retry_and_isolation(store_engine: Engine) -> None:
     trips = TripService(store_engine)
-    session = trips.create_session("刷新验收")
-    second = trips.create_session("新会话")
+    session = trips.create_session("刷新验收", user_id=TEST_USER_ID)
+    second = trips.create_session("新会话", user_id=TEST_USER_ID)
     app = create_app(Settings(database_url=None))
     app.dependency_overrides[get_history_service] = lambda: RequirementHistoryService(store_engine)
     app.dependency_overrides[get_saved_model] = lambda: model
@@ -97,7 +97,7 @@ def test_refresh_continue_retry_and_isolation(store_engine: Engine) -> None:
 """模型连续失败不写半轮对话，重试仍可基于原版本提交。"""
 
 def test_model_failure_does_not_commit(store_engine: Engine) -> None:
-    session = TripService(store_engine).create_session("失败回滚")
+    session = TripService(store_engine).create_session("失败回滚", user_id=TEST_USER_ID)
     app = create_app(Settings(database_url=None))
     app.dependency_overrides[get_history_service] = lambda: RequirementHistoryService(store_engine)
     model = FakeModel([{}, {}, answer(destination="苏州")])
