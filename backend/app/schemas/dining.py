@@ -1,4 +1,4 @@
-"""数据格式层：保存高德附近餐厅原值、查询锚点和澄清问题，供聊天历史复用。"""
+"""数据格式层：保存附近餐饮或住宿原值和查询条件，沿用历史dining字段。"""
 
 from datetime import UTC, datetime
 from typing import Literal
@@ -9,7 +9,7 @@ from app.schemas.document.answer import GeoPoint, MapLookup
 
 
 class DiningItem(BaseModel):
-    """餐厅结果类：只保存真实地图返回且评分至少四分的餐饮地点。"""
+    """商户结果类：只保存地图返回且评分至少四分的餐馆或住宿地点。"""
 
     poi_id: str
     name: str
@@ -17,11 +17,11 @@ class DiningItem(BaseModel):
     location: GeoPoint
     rating: float = Field(ge=4, le=5, allow_inf_nan=False)
     distance_m: float | None = Field(default=None, ge=0, allow_inf_nan=False)
-    reference_cost: str | None = None  # 高德原始人均消费，不承诺实际账单金额。
+    reference_cost: str | None = None  # 地图原始参考消费，不等于实际账单或酒店每晚房价。
 
 
 class DiningResult(BaseModel):
-    """附近餐饮结果类：区分无餐厅、缺评分、工具失败和需要用户明确地点。"""
+    """周边结果类：沿用餐饮历史字段，新增类别和消费条件均有兼容默认值。"""
 
     status: Literal[
         "found", "empty", "ratings_unavailable", "unconfigured", "error", "needs_clarification",
@@ -32,5 +32,7 @@ class DiningResult(BaseModel):
     preference: str | None = None
     clarification: str | None = None
     rating_missing_count: int = Field(default=0, ge=0)
-    provider: Literal["amap"] = "amap"
+    category: Literal["dining", "lodging"] = "dining"
+    max_cost: float | None = Field(default=None, gt=0, allow_inf_nan=False)
+    provider: Literal["amap", "baidu"] = "amap"
     checked_at: datetime = Field(default_factory=lambda: datetime.now(UTC))

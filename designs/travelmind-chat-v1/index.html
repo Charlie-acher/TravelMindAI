@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#0f766e">
+  <title>TravelMindAI · 对话页设计</title>
+  <link rel="icon" href="logo-mark.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="chat.css">
+</head>
+<body>
+  <!-- 图标只承担视觉提示；按钮名称单独供读屏读取。 -->
+  <svg class="symbols" aria-hidden="true"><defs>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"></path></symbol>
+    <symbol id="i-chat" viewBox="0 0 24 24"><path d="M20 11.5a8 8 0 0 1-8 8H5l-3 2v-7a8 8 0 1 1 18-3Z"></path><path d="M8 11h.01M12 11h.01M16 11h.01"></path></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"></circle><path d="m16 16 4 4"></path></symbol>
+    <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1" fill="currentColor"></circle><circle cx="12" cy="12" r="1" fill="currentColor"></circle><circle cx="19" cy="12" r="1" fill="currentColor"></circle></symbol>
+    <symbol id="i-edit" viewBox="0 0 24 24"><path d="m14 4 6 6M4 20l5-1L21 7a2 2 0 0 0-4-4L5 15Z"></path></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M6 7l1 14h10l1-14M10 11v6M14 11v6"></path></symbol>
+    <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 3H5v18h14V8ZM14 3v5h5M8 12h8M8 16h6"></path></symbol>
+    <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M12 20V4m-6 6 6-6 6 6"></path></symbol>
+    <symbol id="i-panel" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3"></rect><path d="M9 4v16m7-11-3 3 3 3"></path></symbol>
+    <symbol id="i-pin" viewBox="0 0 24 24"><path d="M19 10c0 5-7 11-7 11S5 15 5 10a7 7 0 1 1 14 0Z"></path><circle cx="12" cy="10" r="2"></circle></symbol>
+    <symbol id="i-route" viewBox="0 0 24 24"><circle cx="6" cy="6" r="2"></circle><circle cx="18" cy="18" r="2"></circle><path d="M8 6h7a4 4 0 0 1 0 8H9a4 4 0 0 0 0 8M18 16v-4"></path></symbol>
+    <symbol id="i-leaf" viewBox="0 0 24 24"><path d="M20 3S5 1 4 12c-1 9 15 12 16-9ZM4 21 15 9"></path></symbol>
+    <symbol id="i-books" viewBox="0 0 24 24"><rect x="3" y="4" width="5" height="16" rx="1"></rect><rect x="8" y="4" width="5" height="16" rx="1"></rect><path d="m14 5 5-1 3 15-5 1ZM5 8h1M10 8h1"></path></symbol>
+    <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m8 10 4 4 4-4"></path></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"></path></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"></path></symbol>
+    <symbol id="i-logout" viewBox="0 0 24 24"><path d="M10 4H4v16h6M9 12h12m-4-4 4 4-4 4"></path></symbol>
+  </defs></svg>
+
+  <div class="shell" data-screen-label="旅行对话设计">
+    <button class="sidebar-scrim" aria-label="关闭侧栏" hidden></button>
+    <aside class="sidebar" aria-label="对话导航">
+      <div class="sidebar-brand"><a class="brand" href="./" aria-label="TravelMindAI 新对话"><img src="logo-mark.svg" alt=""><span>TravelMind<em>AI</em></span></a><button class="icon-button collapse" aria-label="收起侧栏" title="收起侧栏"><svg><use href="#i-panel"></use></svg></button></div>
+      <div class="sidebar-actions">
+        <button class="new-chat"><svg><use href="#i-plus"></use></svg><span>新建对话</span><kbd>Ctrl K</kbd></button>
+        <label class="search"><svg><use href="#i-search"></use></svg><input id="search" type="search" placeholder="搜索历史对话" aria-label="搜索历史对话"></label>
+      </div>
+      <div class="history-heading">历史对话<span id="history-count"></span></div>
+      <nav class="history-list" id="history-list" aria-label="历史对话"></nav>
+      <div class="sidebar-bottom">
+        <button class="knowledge-entry" id="knowledge-entry" hidden><svg><use href="#i-books"></use></svg><span>知识库管理</span><span class="admin-tag">管理</span></button>
+        <button class="account" id="account-button" popovertarget="account-menu" aria-label="打开个人信息"><span class="avatar" id="avatar">C</span><span class="account-label"><strong id="account-name">charlie</strong><small id="account-role">个人账号</small></span><svg><use href="#i-chevron"></use></svg></button>
+      </div>
+    </aside>
+
+    <main class="workspace">
+      <header class="topbar"><div class="topbar-left"><button class="icon-button expand" aria-label="展开侧栏" title="展开侧栏"><svg><use href="#i-panel"></use></svg></button><span class="conversation-title" id="conversation-title">新对话</span></div><div class="preview-tools"><span class="preview-label" title="独立交互设计稿，不连接账号、模型或上传接口">设计预览</span><select id="role" aria-label="预览身份"><option value="user">用户视图</option><option value="admin">管理员视图</option></select></div></header>
+      <section class="chat-area is-empty" id="chat-area" aria-label="旅行对话">
+        <div class="welcome" id="welcome"><div class="welcome-brand"><img src="logo-mark.svg" alt=""><span>TravelMind<em>AI</em></span></div><h1>这一程，从你的想法开始。</h1><p>一个目的地，一份攻略，或者一个还没想好的周末。</p></div>
+        <div class="messages" id="messages" role="log" aria-live="polite"></div>
+        <div class="composer-wrap">
+          <form class="composer" id="composer">
+            <div class="drop-hint" aria-hidden="true"><svg><use href="#i-file"></use></svg><strong>松开添加到当前对话</strong><span>上传后可补充旅行要求</span></div>
+            <div class="attachment-list" id="attachments"></div>
+            <label class="sr-only" for="message">你的旅行想法</label><textarea id="message" rows="3" maxlength="6000" placeholder="告诉我想去哪里，也可以上传攻略，一起慢慢规划…"></textarea>
+            <div class="composer-controls"><button class="attach-button icon-button" type="button" popovertarget="upload-menu" aria-label="添加旅行资料" title="添加旅行资料"><svg><use href="#i-plus"></use></svg></button><span class="composer-mode"><span class="mode-dot"></span>旅行规划</span><div class="send-group"><span class="keyboard-hint">Enter 发送</span><button class="send" type="submit" aria-label="发送消息" disabled><svg><use href="#i-arrow"></use></svg></button></div></div>
+          </form>
+          <div class="suggestions" id="suggestions"><button data-prompt="想去杭州玩三天，希望节奏轻松一些。"><svg><use href="#i-pin"></use></svg>杭州三日慢游</button><button data-prompt="想安排一个周末短途旅行，请先问问我的出发城市。"><svg><use href="#i-route"></use></svg>找个周末去走走</button><button data-prompt="想带爸妈旅行，希望少走路，住得舒适一些。"><svg><use href="#i-leaf"></use></svg>带爸妈轻松出游</button></div>
+          <p class="composer-note" id="composer-note">把行程交给规划，把期待留给出发。<i></i></p>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div class="floating-menu" id="session-menu" popover="auto"><button id="rename-action"><svg><use href="#i-edit"></use></svg>重命名</button><div class="menu-divider"></div><button id="delete-action" class="danger"><svg><use href="#i-trash"></use></svg>删除对话</button></div>
+  <div class="floating-menu account-popup" id="account-menu" popover="auto"><strong id="profile-name">charlie</strong><small id="profile-role">个人账号 · 私人旅行对话</small><div class="menu-divider"></div><button id="logout"><svg><use href="#i-logout"></use></svg>退出登录</button></div>
+  <div class="floating-menu upload-popup" id="upload-menu" popover="auto"><button id="choose-files"><svg><use href="#i-file"></use></svg><span>添加旅行资料<small>攻略、行程单、路线图片</small></span></button><p>PDF 最大30MB · 其他文件最大10MiB<br>PDF、DOCX、PNG/JPG/WebP、TXT、Markdown<br>每条最多3份 · 仅用于当前对话</p><div class="upload-tip">也可将文件拖入输入框</div></div>
+  <input type="file" id="file-input" multiple accept=".pdf,.docx,.txt,.md,.markdown,.png,.jpg,.jpeg,.webp" hidden>
+
+  <dialog id="rename-dialog" aria-labelledby="rename-title"><form id="rename-form"><div class="dialog-heading"><h2 id="rename-title">重命名对话</h2><button class="icon-button dialog-close" type="button" aria-label="关闭重命名"><svg><use href="#i-close"></use></svg></button></div><label for="new-title">给这段旅程起个名字</label><input id="new-title" maxlength="80" required><div class="dialog-actions"><button class="secondary dialog-close" type="button">取消</button><button class="primary" type="submit">保存名称</button></div></form></dialog>
+  <dialog id="delete-dialog" aria-labelledby="delete-title"><div class="dialog-heading"><h2 id="delete-title">删除这段对话？</h2><button class="icon-button dialog-close" aria-label="关闭删除确认"><svg><use href="#i-close"></use></svg></button></div><p>“<span id="delete-name"></span>”将从历史对话中移除。</p><p class="dialog-muted">删除后无法恢复，请确认不再需要这段记录。</p><div class="dialog-actions"><button class="secondary dialog-close">保留对话</button><button class="danger-primary" id="confirm-delete">删除对话</button></div></dialog>
+  <dialog id="info-dialog" aria-labelledby="info-title"><div class="dialog-heading"><h2 id="info-title">设计预览</h2><button class="icon-button dialog-close" aria-label="关闭说明"><svg><use href="#i-close"></use></svg></button></div><p id="info-text"></p><div class="dialog-actions"><button class="primary dialog-close">知道了</button></div></dialog>
+  <div class="toast" id="toast" role="status" hidden></div>
+  <script src="chat.js"></script>
+</body>
+</html>

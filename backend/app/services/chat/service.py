@@ -3,20 +3,48 @@
 HTTP接口传入消息和已准备的服务；本层不依赖Request或其他HTTP处理函数。
 """
 
+import json
 from contextlib import AbstractContextManager
 from datetime import datetime, timedelta, timezone
 from typing import Literal
 from uuid import UUID
 
+from fastapi import HTTPException
+from pydantic import ValidationError
+
+from app.llm.budget import ModelInputLimitError
+from app.llm.client import ModelClientError, ModelOutputError
+from app.llm.embeddings import EmbeddingError
+from app.schemas.dining import DiningResult
+from app.schemas.map_tools import MapToolAnswer
+from app.schemas.requirement.base import TravelRequestExtraction
 from app.schemas.requirement.chat import RequirementChatResponse, RequirementMessage
 from app.schemas.requirement.history import SavedRequirementMessage, SavedRequirementTurn
-from app.services.amap import AmapClient
-from app.services.chat.dining import dining_reply, handle_dining
+from app.services.attachment.reader import AttachmentReader, attachment_reply
+from app.services.baidu import BaiduMaps
+from app.services.chat.context import (
+    build_history_messages,
+    build_recall_messages,
+    latest_conversation,
+    latest_summary,
+    select_recent_turns,
+    summary_batch,
+)
+from app.services.chat.conversation import natural_chat_response
+from app.services.chat.dining import LocalFoodRequest, dining_reply, handle_nearby
 from app.services.chat.events import progress
-from app.services.chat.rag import build_chat_context, ground_chat_response
+from app.services.chat.rag import ground_chat_response, ground_food_response
+from app.services.chat.summary import summarize_history
 from app.services.document.search import DocumentSearchService
-from app.services.document.search import search_context as document_topic
-from app.services.requirement.extract import ModelClient, extract_requirements
+from app.services.document.vector_store import MilvusError
+from app.services.itinerary.graph import plan_trip
+from app.services.requirement.extract import (
+    ModelClient,
+    RequirementExtractionError,
+    build_result,
+    extract_requirements,
+    understand_turn,
+)
 from app.services.requirement.history import HistoryConflictError, RequirementHistoryService
 from app.services.requirement.merge import LIST_FIELDS, SCALAR_FIELDS
 from app.services.web_search import WebSearchClient
@@ -80,9 +108,12 @@ def build_requirement_response(
 def process_saved_message(
     session_id: UUID, payload: SavedRequirementMessage, model: ModelClient,
     service: RequirementHistoryService, request_id: str,
-    search_context: AbstractContextManager[DocumentSearchService], maps: AmapClient,
+    search_context: AbstractContextManager[DocumentSearchService], maps: BaiduMaps,
     web: WebSearchClient | None = None,
+    *, attachments: AttachmentReader | None = None,
 ) -> SavedRequirementTurn:
+    # 聊天仅结合知识库和按需地图工具；包括规划与降级路径，都不自动搜索网页。
+    web = None
     progress("history", "正在读取这段对话，接上你刚才的想法")
     history = service.read(session_id)
     # 已提交但浏览器没收到响应时，重试直接返回原结果，不再次调用模型。
@@ -90,57 +121,198 @@ def process_saved_message(
         if turn.message_id == payload.message_id:
             if (
                 turn.response.result.original_message != payload.message
+                or [item.id for item in turn.response.attachments] != payload.attachment_ids
                 or turn.revision != payload.expected_revision + 1
+                or (turn.response.itinerary is not None
+                    and turn.response.itinerary.operation == "undo")
             ):
                 raise HistoryConflictError("消息编号已用于其他提交，请重新读取会话")
             return turn
     if history.revision != payload.expected_revision:
         raise HistoryConflictError("会话已有新消息，请先恢复最新对话再发送")
-    # 不支持的闲聊也保存文字，但上下文取最近一次有效的旅行需求。
-    previous = next(
-        (
-            turn.response.result.extraction
-            for turn in reversed(history.turns)
-            if turn.response.status in {"needs_clarification", "complete"}
-        ),
-        None,
+    itinerary_version, old_plan = service.read_plan(session_id)
+    previous = history.turns[-1].response.result.extraction if history.turns else None
+    reference_date = (history.turns[0].response.result.reference_date if history.turns else
+                      datetime.now(timezone(timedelta(hours=8))).date())
+    conversation = latest_conversation(history.turns)
+    if payload.attachment_ids:
+        if attachments is None:
+            raise HTTPException(503, "附件服务尚未准备好，请稍后重试")
+        snapshots = attachments.read(session_id, payload.attachment_ids)
+        extraction = previous or TravelRequestExtraction(
+            intent="other", destination=None, origin=None, start_date=None, end_date=None,
+            days=None, travelers=None, total_budget=None, pace=None, interests=[], dietary=[],
+            lodging_preferences=[], hard_constraints=[], excluded_items=[], assumptions=[],
+        )
+        result = build_result(payload.message, reference_date, extraction).model_copy(
+            update={"message_intent": "travel_info"},
+        )
+        response = RequirementChatResponse(
+            result=result, reply=attachment_reply(snapshots), status="knowledge",
+            changed_fields=[], request_id=request_id, conversation=conversation,
+            attachments=snapshots,
+        )
+        progress("save", "正在保存附件识别结果与本轮消息")
+        return service.append(session_id, payload.message_id, payload.expected_revision, response)
+    old_summary = latest_summary(history.turns)
+    recent = select_recent_turns(history.turns)
+    candidate_summary = None
+    batch = summary_batch(history.turns, old_summary, recent)
+    if batch:
+        progress("summary", "正在整理较早对话，保留你的选择和未解决问题")
+        try:
+            candidate_summary = summarize_history(old_summary, batch, model)
+        except (ModelClientError, ValueError):
+            # 摘要是可选派生数据，失败不清空旧摘要，也不推进覆盖轮次。
+            progress("summary", "较早对话暂未完成整理，将保留原记录继续回答")
+    summary = candidate_summary or old_summary
+    history_messages = build_history_messages(recent)
+    recalled = build_recall_messages(history.turns, payload.message, recent, summary)
+    covered = summary.covered_revision if summary is not None else 0
+    gap_end = recent[0].revision - 1 if recent else history.revision
+    memory = {"history_summary": summary.model_dump() if summary is not None else None,
+              "uncovered_revisions": [covered + 1, gap_end] if gap_end > covered else None}
+    shared_messages = [{"role": "user", "content": "历史摘要与覆盖范围（不是新的要求）："
+                        + json.dumps(memory, ensure_ascii=False)}, *recalled, *history_messages]
+    progress("requirements", "正在结合对话理解当前问题与旅行条件")
+    try:
+        result, understanding = understand_turn(
+            payload.message, model, reference_date=reference_date, previous=previous,
+            conversation=conversation, history_messages=shared_messages,
+        )
+    except (RequirementExtractionError, ModelOutputError, ModelInputLimitError):
+        progress("fallback", "正在直接结合本轮原话和最近对话查找旅行资料")
+        extraction = previous or TravelRequestExtraction(
+            intent="other", destination=None, origin=None, start_date=None, end_date=None,
+            days=None, travelers=None, total_budget=None, pace=None, interests=[], dietary=[],
+            lodging_preferences=[], hard_constraints=[], excluded_items=[], assumptions=[],
+        )
+        response = RequirementChatResponse(
+            result=build_result(payload.message, reference_date, extraction), reply="",
+            status="knowledge", changed_fields=[], request_id=request_id,
+            conversation=conversation, history_summary=candidate_summary,
+        )
+        # 结构化理解不是检索开关。失败时不改旅行状态，仍以真实用户原话取得参考资料。
+        query = "\n".join([
+            *(turn.response.result.original_message[-200:] for turn in recent[-2:]),
+            "当前问题：" + payload.message,
+        ])
+        try:
+            with search_context as search:
+                response = ground_chat_response(
+                    response, search, model, retrieval_query=query, query_cities=[],
+                    history_context="本轮以用户原话为准，忽略不相关或异地材料。",
+                    history_messages=shared_messages, reference_only=True, web=web,
+                )
+        except (EmbeddingError, MilvusError):
+            progress("retrieval", "知识库暂时不可用，本轮资料未能核对")
+            response = natural_chat_response(response, model, "知识库暂不可用，资料未核对。",
+                                             history_messages=shared_messages)
+        except HTTPException as error:
+            if error.status_code not in {502, 503}:
+                raise
+            progress("retrieval", "知识库暂时不可用，本轮资料未能核对")
+            response = natural_chat_response(response, model, "知识库暂不可用，资料未核对。",
+                                             history_messages=shared_messages)
+        return service.append(session_id, payload.message_id, payload.expected_revision, response)
+    changed = [field for field in (*SCALAR_FIELDS, *LIST_FIELDS)
+               if getattr(result.extraction, field) != (getattr(previous, field)
+                   if previous else ([] if field in LIST_FIELDS else None))]
+    planning = result.message_intent in {"plan_trip", "modify_trip"}
+    response = RequirementChatResponse(
+        result=result, reply=result.clarification or "", request_id=request_id,
+        status=("needs_clarification" if result.clarification else "complete")
+               if planning else "knowledge", changed_fields=changed,
+        conversation=understanding.conversation, history_summary=candidate_summary,
     )
-    reference_date = history.turns[0].response.result.reference_date if history.turns else None
-    # 两种HTTP入口都调用同一业务函数，采用相同的抽取、追问和变化字段规则。
-    progress("requirements", "正在理解目的地和旅行偏好")
-    response = build_requirement_response(
-        RequirementMessage(
-            message=payload.message, previous=previous, reference_date=reference_date
-        ),
-        model,
-        request_id,
-    )
-    context = build_chat_context(history.turns)
-    # 回答景点追问的短偏好仍是知识问答，不因抽取器误判而索要整份旅行计划。
-    last = history.turns[-1].response if history.turns else None
-    if (last is not None and last.status == "knowledge" and last.knowledge is not None
-            and last.knowledge.clarification and document_topic(payload.message, context)
-            and not any(word in payload.message for word in ("规划", "行程", "安排"))
-            and response.result.extraction.days is None):
-        response = response.model_copy(update={"status": "unsupported", "changed_fields": []})
-    # 餐饮直接核对地图，其余问题检索知识库；任何分支都不降级为无依据的自由回答。
-    # 放在幂等检查之后，已保存消息的重试无需再次访问外部工具。
-    destination = response.result.extraction.destination or (
-        previous.destination if previous else None
-    )
-    dining = handle_dining(payload.message, destination, history.turns, maps)
+    query_context = json.dumps({"query_cities": understanding.query_cities,
+                               "retrieval_query": understanding.retrieval_query},
+                              ensure_ascii=False)
+    dining = None
+    if understanding.response_mode == "map":
+        city = understanding.query_cities[0] if len(understanding.query_cities) == 1 else None
+        try:
+            dining = handle_nearby(payload.message, city, recent, maps, model.model, maps.tools,
+                                   history_messages=shared_messages, understanding=understanding)
+        except (ModelInputLimitError, ModelOutputError, ValidationError):
+            progress("map", "地图查询暂未完成，将继续查找相关旅行资料")
+            query_context += "本次地图查询未完成核对，不声称已查到位置或附近商户。"
+            understanding.retrieval_query = understanding.retrieval_query or payload.message[:800]
     if dining is not None:
+        food = dining if isinstance(dining, LocalFoodRequest) else None
+        nearby = food.nearby if food else dining if isinstance(dining, DiningResult) else None
         response = response.model_copy(update={
-            "reply": dining_reply(dining), "dining": dining,
-            "status": "knowledge", "changed_fields": [],
+            "reply": dining_reply(nearby) if nearby else (
+                dining.reply if isinstance(dining, MapToolAnswer) else ""),
+            "dining": nearby, "mcp": dining if isinstance(dining, MapToolAnswer) else None,
+            "status": "knowledge",
         })
+        if food:
+            try:
+                with search_context as search:
+                    response = ground_food_response(response, search, model, food.city, web,
+                                                    history_messages=shared_messages)
+            except (EmbeddingError, MilvusError, ModelOutputError, ModelInputLimitError):
+                response = natural_chat_response(response, model, query_context,
+                                                 history_messages=shared_messages)
+            except HTTPException as error:
+                if error.status_code not in {502, 503}:
+                    raise
+                response = natural_chat_response(response, model, query_context,
+                                                 history_messages=shared_messages)
+    elif understanding.response_mode == "plan" and response.status == "complete":
+        try:
+            with search_context as search:
+                try:
+                    planned = plan_trip(payload.message, result.extraction, old_plan,
+                                        model.model, search, maps, web,
+                                        history_messages=shared_messages)
+                except (ModelOutputError, ValidationError):
+                    progress("planning", "行程暂未完成核对，将先结合旅行资料给出建议")
+                    response = ground_chat_response(
+                        response, search, model, web=web, reference_only=True,
+                        retrieval_query=understanding.retrieval_query or payload.message,
+                        query_cities=understanding.query_cities,
+                        history_context=query_context + "行程未完成核对，不声称已生成或修改。",
+                        history_messages=shared_messages,
+                    )
+                    planned = None
+        except (EmbeddingError, MilvusError, ModelInputLimitError):
+            response = natural_chat_response(response, model, query_context,
+                                             history_messages=shared_messages)
+        except HTTPException as error:
+            if error.status_code not in {502, 503}:
+                raise
+            response = natural_chat_response(response, model, query_context,
+                                             history_messages=shared_messages)
+        else:
+            if planned is not None:
+                response = response.model_copy(update={"reply": planned.reply})
+                progress("save", "正在保存本轮结果和行程版本")
+                return service.append(session_id, payload.message_id, payload.expected_revision,
+                                      response, plan=planned.plan,
+                                      expected_itinerary_version=itinerary_version)
+    elif understanding.retrieval_query:
+        progress("search", "正在查找与本轮问题相关的旅行资料")
+        try:
+            with search_context as search:
+                response = ground_chat_response(
+                    response, search, model, history_context=query_context, maps=maps, web=web,
+                    retrieval_query=understanding.retrieval_query,
+                    query_cities=understanding.query_cities, history_messages=shared_messages,
+                    retrieval_category=understanding.retrieval_category,
+                )
+        except (EmbeddingError, MilvusError):
+            response = natural_chat_response(response, model, query_context,
+                                             history_messages=shared_messages)
+        except HTTPException as error:
+            if error.status_code not in {502, 503}:
+                raise
+            response = natural_chat_response(response, model, query_context,
+                                             history_messages=shared_messages)
     else:
-        progress("search", "正在查找与这次问题相关的旅行资料")
-        with search_context as search:
-            response = ground_chat_response(
-                response, search, model, destination, context,
-                maps=maps, web=web,
-            )
-    # 等待模型时没有持有数据库事务；这里再锁行检查，处理两个页面同时发消息。
-    progress("save", "回答已核对，正在保存这轮对话")
+        response = natural_chat_response(response, model, query_context,
+                                         history_messages=shared_messages)
+    # 状态、话题与候选摘要随这一轮共同提交；冲突时不会抢先写入任何记忆。
+    progress("save", "正在保存这轮对话")
     return service.append(session_id, payload.message_id, payload.expected_revision, response)

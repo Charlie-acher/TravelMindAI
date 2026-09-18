@@ -52,9 +52,15 @@ def test_refresh_continue_retry_and_isolation(store_engine: Engine) -> None:
             # 首轮故意误标为修改，验证正式服务校正后保存，刷新不恢复成错误标签。
             answer(intent="modify_trip", destination="杭州", days=3,
                    travelers=2, total_budget="5000"),
+            {"tools": [{"tool": "knowledge_search", "query": "杭州景点"}]},
+            {"clarification": "本例资料为空，请补充景点资料后规划。"},
             answer(intent="modify_trip", travelers=3),
+            {"tools": [{"tool": "knowledge_search", "query": "杭州景点"}]},
+            {"clarification": "本例资料为空，请补充景点资料后规划。"},
             answer(intent="other"),
             answer(intent="modify_trip", origin="银川"),
+            {"tools": [{"tool": "knowledge_search", "query": "杭州景点"}]},
+            {"clarification": "本例资料为空，请补充景点资料后规划。"},
         ]
     )
     url = f"/api/v1/sessions/{session.id}/requirement-messages"
@@ -105,9 +111,11 @@ def test_model_failure_does_not_commit(store_engine: Engine) -> None:
     url = f"/api/v1/sessions/{session.id}/requirement-messages"
     payload = message("想去苏州")
     with TestClient(app) as client:
-        assert client.post(url, json=payload).status_code == 502
-        assert client.get(url).json()["revision"] == 0
-        assert client.post(url, json=payload).json()["revision"] == 1
+        fallback = client.post(url, json=payload)
+        assert fallback.status_code == 200
+        assert fallback.json()["response"]["reply"] == "这是测试回答。"
+        assert client.get(url).json()["revision"] == 1
+        assert client.post(url, json=payload).json() == fallback.json()
 
 
 """无数据库时返回可读错误；空消息、伪造旧需求等输入在调用模型前被拒绝。"""

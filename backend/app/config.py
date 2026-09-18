@@ -24,9 +24,9 @@ class Settings(BaseSettings):
     # None 表示没有配置数据库，已有的纯预算接口仍可使用。
     database_url: SecretStr | None = None
 
-    # 原文件默认保存到backend/data/uploads，从哪个目录启动都使用同一位置。
+    # 原文件统一保存在项目temp/uploads；属于业务资料，阶段清理时必须保留。
     # 可通过环境变量改为其他绝对路径；这里仅记录路径，不创建目录。
-    document_upload_dir: Path = Path(__file__).resolve().parents[2] / "data" / "uploads"
+    document_upload_dir: Path = Path(__file__).resolve().parents[2] / "temp" / "uploads"
 
     # 单模型抽取配置；未提供密钥时，原来的预算、数据库服务仍能启动。
     # 优先使用正式变量名，同时兼容学习示例里的DS_API_KEY。
@@ -39,6 +39,12 @@ class Settings(BaseSettings):
     deepseek_model: str = Field(default="deepseek-v4-pro", min_length=1)
     # HTTP连接、读、写和连接池等待均使用此超时秒数，不能为0或无穷大。
     deepseek_timeout_seconds: float = Field(default=30, gt=0, allow_inf_nan=False)
+
+    # 私人图片只发送到显式配置的百炼视觉入口，不自动复用文本或向量密钥。
+    vision_api_key: SecretStr | None = None
+    vision_base_url: HttpUrl | None = None
+    vision_model: str = Field(default="qwen3-vl-plus", min_length=1)
+    vision_timeout_seconds: float = Field(default=60, gt=0, allow_inf_nan=False)
 
     # 向量服务独立配置，不借用聊天模型的地址、名称或密钥。
     # 暂未开通时留空，已有Web功能仍可启动；试跑命令会检查是否配齐。
@@ -55,8 +61,8 @@ class Settings(BaseSettings):
     milvus_url: HttpUrl | None = None
     milvus_timeout_seconds: float = Field(default=30, gt=0, allow_inf_nan=False)
 
-    # 高德Web服务密钥只由后端使用；留空时不发地图请求，也不影响知识库回答。
-    amap_api_key: SecretStr | None = None
+    # 地图统一使用百度官方MCP；密钥仅由后端读取，留空时地图工具不可用。
+    baidu_map_api_key: SecretStr | None = Field(default=None, validation_alias="BAIDU_MAP_API_KEY")
 
     # 联网搜索独立于DeepSeek；没有搜索Key时仍可使用知识库，页面标明尚未补查。
     tavily_api_key: SecretStr | None = None

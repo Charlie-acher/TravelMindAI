@@ -94,8 +94,11 @@ def main(argv: list[str] | None = None) -> int:
     print(f"题库校验通过：{len(dataset['corpus'])}片段，{len(dataset['cases'])}题。", flush=True)
     if not args.live:
         return 0
-    if args.output is None or args.output.exists() or args.output.with_suffix(".md").exists():
-        parser.error("真实评测需要--output指定全新报告路径")
+    if args.output is None:
+        now = datetime.now(UTC)
+        args.output = root.parent / "temp/reports" / f"m3-{now:%Y%m%dT%H%M%S%fZ}.json"
+    if args.output.exists() or args.output.with_suffix(".md").exists():
+        parser.error("请用--output指定全新报告路径，不能覆盖已有报告")
     settings = load_settings(args.env_file)
     if args.model_env_file:
         model_settings = load_settings(args.model_env_file)

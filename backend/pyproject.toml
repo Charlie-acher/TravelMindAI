@@ -23,6 +23,9 @@ dependencies = [
     "pypdf>=6.18.1,<7", # 读取有文字层的PDF，并保留从1开始的物理页码。
     "python-docx>=1.2,<2", # 按正文顺序读取DOCX段落和表格，不需要安装Word。
     "argon2-cffi>=25.1,<26",
+    "langgraph>=1,<2",
+    "langchain[mcp]>=1.4.0,<1.5.0",
+    "pillow>=12,<13",
 ]
 
 # 开发工具只用于开发/测试，未来部署时可以用 uv sync --no-dev 排除。

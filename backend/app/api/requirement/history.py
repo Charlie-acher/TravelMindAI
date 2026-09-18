@@ -14,15 +14,19 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy import Engine
 
+from app.api.attachments import get_attachment_service
 from app.api.auth import require_session_owner
 from app.api.document.dependencies import get_search_service
 from app.llm.client import DeepSeekClient
+from app.llm.vision import QwenVisionClient
+from app.schemas.itinerary import UndoDraftRequest
 from app.schemas.requirement.history import (
     RequirementHistory,
     SavedRequirementMessage,
     SavedRequirementTurn,
 )
-from app.services.amap import AmapClient
+from app.services.attachment.reader import AttachmentReader
+from app.services.baidu import BaiduMaps
 from app.services.chat.events import event_sink
 from app.services.chat.service import process_saved_message
 from app.services.requirement.extract import ModelClient
@@ -61,6 +65,17 @@ def read_history(session_id: UUID, service: HistoryDependency) -> RequirementHis
     return service.read(session_id)
 
 
+"""草稿撤销函数：沿用会话归属和跨站保护，恢复上版完整需求及行程。"""
+
+@router.post("/{session_id}/drafts/undo", response_model=SavedRequirementTurn)
+def undo_draft(
+    session_id: UUID, payload: UndoDraftRequest, request: Request, service: HistoryDependency,
+) -> SavedRequirementTurn:
+    if service is None:
+        raise HTTPException(503, "未启用数据库，请配置 TRAVELMIND_DATABASE_URL 后重启服务")
+    return service.undo(session_id, payload, request.state.request_id)
+
+
 """消息发送函数：基于历史处理需求和RAG，检查版本后保存回答与引用。"""
 
 @router.post("/{session_id}/requirement-messages", response_model=SavedRequirementTurn)
@@ -73,12 +88,15 @@ def send_saved_message(
 ) -> SavedRequirementTurn:
     if service is None:
         raise HTTPException(503, "未启用数据库，请配置 TRAVELMIND_DATABASE_URL 后重启服务")
-    with httpx.Client() as map_http:
+    with httpx.Client() as map_http, BaiduMaps(request.app.state.settings) as maps:
         return process_saved_message(
             session_id, payload, model, service, request.state.request_id,
             contextmanager(get_search_service)(request),
-            AmapClient(request.app.state.settings, map_http),
+            maps,
             WebSearchClient(request.app.state.settings, map_http),
+            attachments=AttachmentReader(get_attachment_service(request), model,
+                lambda: QwenVisionClient(request.app.state.settings, map_http))
+                if payload.attachment_ids else None,
         )
 
 
@@ -111,12 +129,16 @@ async def stream_saved_message(
     def run() -> None:
         token = event_sink.set(notify)
         try:
-            with httpx.Client() as http:
-                settings = request.app.state.settings
+            settings = request.app.state.settings
+            with httpx.Client() as http, BaiduMaps(settings) as maps:
+                model = DeepSeekClient(settings, http)
                 turn = process_saved_message(
-                    session_id, payload, DeepSeekClient(settings, http), service,
+                    session_id, payload, model, service,
                     request.state.request_id, contextmanager(get_search_service)(request),
-                    AmapClient(settings, http), WebSearchClient(settings, http),
+                    maps, WebSearchClient(settings, http),
+                    attachments=AttachmentReader(get_attachment_service(request), model,
+                        lambda: QwenVisionClient(settings, http))
+                        if payload.attachment_ids else None,
                 )
                 loop.call_soon_threadsafe(enqueue, "done", turn.model_dump(mode="json"))
         except Exception as error:

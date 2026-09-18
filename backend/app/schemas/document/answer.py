@@ -30,11 +30,12 @@ class MapQuery(BaseModel):
 
 
 class GeoPoint(BaseModel):
-    """地图坐标类：保存高德坐标系和经纬度，拒绝越界或无穷大的数字。"""
+    """地图坐标类：保存明确的坐标系和经纬度，拒绝越界或无穷大的数字。"""
 
     longitude: float = Field(ge=-180, le=180, allow_inf_nan=False)
     latitude: float = Field(ge=-90, le=90, allow_inf_nan=False)
-    coordinate_system: Literal["GCJ-02"] = "GCJ-02"
+    # 默认值只为兼容缺字段的旧快照；新百度结果明确传BD-09。
+    coordinate_system: Literal["GCJ-02", "BD-09"] = "GCJ-02"
 
 
 class MapLookup(BaseModel):
@@ -42,14 +43,15 @@ class MapLookup(BaseModel):
 
     city: str
     name: str
-    status: Literal["found", "no_match", "ambiguous", "unconfigured", "error"]
+    # 普通资料推荐未请求定位，与已查询但未匹配、未配置服务分别记录。
+    status: Literal["found", "no_match", "ambiguous", "unconfigured", "error", "not_requested"]
     checked_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
-    provider: Literal["amap"] = "amap"
+    provider: Literal["amap", "baidu"] = "amap"  # 保留旧快照来源，新查询明确传baidu。
     poi_id: str | None = None
     matched_name: str | None = None  # 地图实际返回的名称，保留别名核对结果。
     match_kind: Literal["poi", "administrative"] | None = None  # 行政中心不是景点入口。
     address: str | None = None
-    reference_cost: str | None = None  # 高德business.cost原含义为人均消费，不是票价。
+    reference_cost: str | None = None  # 地图商户参考消费不是票价。
     location: GeoPoint | None = None  # 景点中心；没有有效坐标时不能在地图上打点。
     entrance: GeoPoint | None = None  # 入口单独保存，避免把景点中心当导航入口。
 

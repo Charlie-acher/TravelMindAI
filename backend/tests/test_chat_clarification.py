@@ -13,7 +13,7 @@ from app.services.document.search import search_context
 from tests.helpers import evidence
 from tests.test_chat_rag import response
 
-"""距离追问测试函数：正常口语条件不需要伪造资料引用，也不应进入门票生成。"""
+"""距离回答测试函数：口语距离偏好交给自然回答，不强制固定补问格式。"""
 
 @pytest.mark.parametrize("message", [
     "杭州有哪些值得玩的景点？最好是三五个离得不远",
@@ -22,11 +22,15 @@ from tests.test_chat_rag import response
 def test_vague_proximity_asks_a_question(message: str) -> None:
     search, model = Mock(), Mock()
     search.search.return_value = SearchResult(items=[evidence()])
+    model.generate_json.return_value = "{}"
+    model.generate_text.return_value = "可以先按片区集中推荐，再根据实际交通调整。"
     result = ground_chat_response(response(message), search, model)
-    assert result.knowledge.clarification
-    assert "？" in result.reply
-    assert result.knowledge.points == []
-    model.generate_json.assert_not_called()
+    assert result.reply == "可以先按片区集中推荐，再根据实际交通调整。"
+    assert result.knowledge is not None
+    assert result.knowledge.status == "insufficient" and not result.knowledge.attractions
+    assert (result.knowledge.sources[0].hit.chunk.text
+            == search.search.return_value.items[0].chunk.text)
+    model.generate_text.assert_called_once()
 
 
 """偏好接续测试函数：简短回答带回上一轮地点，完整的新城市问题不借用旧话题。"""
@@ -96,6 +100,23 @@ def test_malformed_ticket_isolated_from_recommendation() -> None:
     assert result.clarification
 
 
+"""介绍保留测试函数：坏票据只移除收费句，普通推荐不强迫用户追问地址门票。"""
+
+
+def test_bad_ticket_keeps_description_without_forcing_map_followup() -> None:
+    model = Mock()
+    model.generate_json.return_value = json.dumps({
+        "status": "answered", "points": [{"text": "可散步。", "source_ids": [1]}],
+        "attractions": [{"city": "杭州", "name": "湖滨路步行街", "source_ids": [1],
+                         "description": "湖边步行街，适合散步。门票90元。", "reason": "可散步。",
+                         "ticket": {"status": "paid", "summary": "门票90元。"}}],
+    })
+    result = answer_from_sources("介绍步行街", [evidence()], model, resolve_locations=False)
+    assert result.attractions[0].description == "湖边步行街，适合散步。"
+    assert "90元" not in str(result)
+    assert result.clarification is None
+
+
 """地址清理测试函数：地址引文无效时，正文重复的地址也不能显示。"""
 
 @pytest.mark.parametrize("street", ["虚构路", "虚构大道"])
@@ -126,13 +147,3 @@ def test_place_anchor_uses_existing_evidence_only() -> None:
                            reason="可散步。", source_ids=[1])
     prepare_attractions([item], {1: "西湖可以沿湖散步。", 2: "杭州西湖游览介绍。"}, set())
     assert item.source_ids == [1, 2]
-
-
-"""距离记忆测试函数：已确认的步行时长在接续提问中继续使用，不重复问同一条件。"""
-
-def test_proximity_followup_uses_known_preference() -> None:
-    from app.services.chat.rag import proximity_clarification
-
-    history = "最近第1轮原话：步行半小时以内\n最近第2轮原话：杭州景点离得不远"
-    assert proximity_clarification("还有离得近的景点吗？", history) is None
-    assert proximity_clarification("还有离得近的景点吗？", "最近第1轮助手追问：步行半小时内吗？")

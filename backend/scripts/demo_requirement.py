@@ -2,7 +2,7 @@
 
 在backend目录执行（会发送真实DeepSeek请求并产生API费用）：
     python -X utf8 -m scripts.demo_requirement --env-file .env --message "想去杭州"
-若复用根目录学习配置，显式使用 --env-file ../.env，支持其中已有的DS_API_KEY。
+正式应用统一显式读取backend/.env，DS_API_KEY仅作为旧环境兼容别名。
 """
 
 import argparse

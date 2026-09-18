@@ -14,6 +14,7 @@ from starlette.concurrency import run_in_threadpool
 from starlette.middleware.base import RequestResponseEndpoint
 from starlette.responses import Response
 
+from app.api.attachments import router as attachments_router
 from app.api.auth import LoginLimiter, get_current_user, require_admin
 from app.api.auth import router as auth_router
 from app.api.budget import router as budget_router
@@ -48,7 +49,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # 将数据库引擎存储到应用程序状态中
         application.state.database_engine = engine
         # 创建TripService实例，如果引擎存在
-        application.state.trip_service = TripService(engine) if engine is not None else None
+        application.state.trip_service = TripService(
+            engine, attachment_dir=settings.document_upload_dir / "conversations",
+        ) if engine is not None else None
         application.state.document_jobs_recovered = False
         # 等待的后台任务不占线程或数据库连接，单进程最多同时处理两份资料。
         application.state.document_job_slots = Semaphore(2)
@@ -81,7 +84,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app = FastAPI(
         title=settings.app_name,
         version="0.1.0",
-        description="预算估算、会话和预算草稿存储：固定演示价格，尚未生成逐日行程。",
+        description="旅行需求、资料问答和逐日行程草稿；预算采用演示单价，交通与开放时间待核实。",
         lifespan=lifespan,
         # 注册错误文档，避免实际返回统一错误，Swagger 却显示默认422格式。
         responses={400: {"model": ErrorResponse}, 422: {"model": ErrorResponse}},
@@ -114,7 +117,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     # /api/v1 与 router 的 /budget、函数的 /estimate 拼成完整接口路径。
     app.include_router(budget_router, prefix="/api/v1")
-    for router in (sessions_router, requirements_router, requirement_history_router):
+    for router in (sessions_router, requirements_router, requirement_history_router,
+                   attachments_router):
         app.include_router(router, prefix="/api/v1", dependencies=[Depends(get_current_user)])
     # 注册资料接口，使用应用已有的数据库连接和统一错误格式。
     for prefix in ("/api/v1", "/api/v1/admin"):

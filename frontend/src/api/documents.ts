@@ -125,11 +125,11 @@ export async function generateDocumentChunks(id: string): Promise<DocumentChunkP
 /** 命中类型：正文和位置来自数据库，相似度不代表内容正确率。 */
 export interface SearchHit { score: number; file_name: string; chunk: DocumentChunk }
 
-/** 地图坐标类型：来自后端验证过的高德数据，不能由页面或模型猜测。 */
-export interface GeoPoint { longitude: number; latitude: number; coordinate_system: 'GCJ-02' }
+/** 地图坐标类型：新查询使用百度坐标，旧历史保留GCJ-02，页面不能猜测或混用。 */
+export interface GeoPoint { longitude: number; latitude: number; coordinate_system: 'BD-09' | 'GCJ-02' }
 export interface MapLookup {
-  city: string; name: string; provider: 'amap'; checked_at: string
-  status: 'found' | 'no_match' | 'ambiguous' | 'unconfigured' | 'error'
+  city: string; name: string; provider: 'amap' | 'baidu'; checked_at: string
+  status: 'found' | 'no_match' | 'ambiguous' | 'unconfigured' | 'error' | 'not_requested'
   poi_id: string | null; address: string | null; reference_cost: string | null
   matched_name?: string | null; match_kind?: 'poi' | 'administrative' | null
   location?: GeoPoint | null; entrance?: GeoPoint | null
@@ -147,7 +147,7 @@ export interface AttractionCard {
   address_evidence?: { text: string; source_id: number; quote: string } | null
 }
 
-/** 问答结果类型：证据保留在后台，页面展示自然回答、景点介绍与查询状态。 */
+/** 问答结果类型：保存回答参考原文，页面可展开文件、页码和网页来源。 */
 export interface AnswerResult {
   status: 'answered' | 'insufficient'
   clarification?: string | null

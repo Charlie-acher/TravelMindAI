@@ -1,0 +1,23 @@
+{
+  "type": "design",
+  "designSystems": [],
+  "primaryDesignSystem": null,
+  "assets": {
+    "TravelMindAI 对话页": {
+      "versions": [
+        {
+          "path": "index.html",
+          "createdAt": "2026-09-17T07:01:57.349Z",
+          "status": "needs-review",
+          "subtitle": "青绿侧栏、历史菜单与私人附件交互预览",
+          "viewport": {
+            "width": 1440,
+            "height": 1000
+          }
+        }
+      ]
+    }
+  },
+  "createdAt": "2026-09-17T07:01:57.350Z",
+  "updatedAt": "2026-09-18T09:36:13.223Z"
+}

@@ -1,26 +1,23 @@
 <script setup lang="ts">
 /** 餐馆展示层：显示本轮保存的地图商户、公开评分和距离，不补造缺失信息。 */
 import type { DiningItem } from '../api/requirements'
+import { baiduMapLink } from '../mapLink'
 
-defineProps<{ items: DiningItem[] }>()
+withDefaults(defineProps<{ items: DiningItem[]; category?: 'dining' | 'lodging'; provider?: 'amap' | 'baidu' }>(), { category: 'dining', provider: 'baidu' })
 
-/** 地图链接函数：采用工具返回的高德坐标，打开对应餐馆的位置。 */
+/** 地图链接函数：采用工具返回的坐标，在百度网页打开对应商户的位置。 */
 function mapLink(item: DiningItem): string {
-  const params = new URLSearchParams({
-    position: `${item.location.longitude},${item.location.latitude}`, name: item.name,
-    coordinate: 'gaode', callnative: '0', src: 'TravelMindAI',
-  })
-  return `https://uri.amap.com/marker?${params}`
+  return baiduMapLink(item.location, item.name, item.address)
 }
 </script>
 
 <template>
-  <div class="restaurant-cards" aria-label="本轮推荐餐馆">
+  <div class="restaurant-cards" :aria-label="category === 'lodging' ? '本轮推荐住宿' : '本轮推荐餐馆'">
     <article v-for="item in items" :key="item.poi_id" class="restaurant-card">
       <header><h3>{{ item.name }}</h3><span class="restaurant-rating">{{ item.rating.toFixed(1) }} 分</span></header>
       <p>{{ item.address || '详细地址暂未提供' }}</p>
-      <div class="restaurant-facts"><span v-if="item.distance_m !== null">距查询地点直线约 {{ Math.round(item.distance_m) }} 米</span><span v-if="item.reference_cost">参考人均 ¥{{ item.reference_cost }}</span></div>
-      <footer><small>高德公开评分 · 人均以到店为准</small><a :href="mapLink(item)" target="_blank" rel="noopener noreferrer">查看地图 ↗</a></footer>
+      <div class="restaurant-facts"><span v-if="item.distance_m !== null">距查询地点直线约 {{ Math.round(item.distance_m) }} 米</span><span v-if="item.reference_cost">{{ category === 'lodging' ? '商户参考消费' : '参考人均' }} ¥{{ item.reference_cost }}</span></div>
+      <footer><small>{{ provider === 'baidu' ? '百度' : '高德' }}公开评分 · {{ category === 'lodging' ? '参考消费不是每晚房价，房价及空房需向酒店确认' : '人均以到店为准' }}</small><a :href="mapLink(item)" target="_blank" rel="noopener noreferrer">查看地图 ↗</a></footer>
     </article>
   </div>
 </template>

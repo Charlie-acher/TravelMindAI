@@ -1,13 +1,13 @@
 """资料业务层：为回答补查地图，只允许查询本轮知识片段中有依据的地点。
 
-回答服务调用本文件；地点匹配和外部HTTP请求由AmapClient执行。
+回答服务调用本文件；地点匹配和MCP查询由BaiduMaps执行。
 """
 
 import re
 
 from app.schemas.document.answer import MapLookup, MapQuery, ModelAnswer, WebEvidence
 from app.schemas.document.search import SearchHit
-from app.services.amap import AmapClient
+from app.services.baidu import BaiduMaps
 from app.services.document.places import evidence_texts
 
 """地图补查函数：补齐漏填的请求，全部核对依据后，按城市与名称去重查询。
@@ -17,7 +17,7 @@ from app.services.document.places import evidence_texts
 
 
 def supplement_maps(
-    answer: ModelAnswer, evidence: list[SearchHit], maps: AmapClient | None,
+    answer: ModelAnswer, evidence: list[SearchHit], maps: BaiduMaps | None,
     web_sources: list[WebEvidence] | None = None,
 ) -> list[MapLookup]:
     texts = evidence_texts(evidence, web_sources or [])
@@ -58,5 +58,5 @@ def supplement_maps(
     # 相同城市和景点只查一次；地图失败可保留有依据的介绍，知识库失败仍不放行。
     unique = dict.fromkeys((query.city, query.name) for query in answer.map_queries)
     return [maps.lookup(city, name) if maps is not None else
-               MapLookup(city=city, name=name, status="unconfigured")
+               MapLookup(city=city, name=name, status="unconfigured", provider="baidu")
                for city, name in unique]

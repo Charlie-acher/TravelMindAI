@@ -1,6 +1,6 @@
 """评测命令：默认只校验题库；--live才调用真实DeepSeek，产生API费用。
 
-示例：python -m scripts.evaluate_requirements --live --env-file ../.env
+示例：python -m scripts.evaluate_requirements --live --env-file .env
 复用网页的抽取/合并服务，但不写旅行会话数据库；题目答案不会传给模型。
 """
 
@@ -121,7 +121,7 @@ def main(argv: list[str] | None = None) -> int:
         print("配置文件不存在。", file=sys.stderr)
         return 1
     now = datetime.now(timezone.utc)
-    output = args.output or root / "evals/reports" / f"m2-{now:%Y%m%dT%H%M%S%fZ}.json"
+    output = args.output or root.parent / "temp/reports" / f"m2-{now:%Y%m%dT%H%M%S%fZ}.json"
     if output.suffix != ".json" or output.exists() or output.with_suffix(".md").exists():
         print("请指定尚不存在的.json路径，保留此前评测记录。", file=sys.stderr)
         return 1

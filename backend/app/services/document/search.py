@@ -7,7 +7,7 @@ import re
 from uuid import UUID
 
 from fastapi import HTTPException
-from sqlalchemy import Engine, select
+from sqlalchemy import Engine, or_, select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -142,6 +142,7 @@ class DocumentSearchService:
     def search(
         self, query: str, limit: int, document_id: UUID | None = None,
         *, metadata: DocumentMetadata | None = None,
+        include_general: bool = False,
     ) -> SearchResult:
         with self._sessions() as unit:
             if document_id is not None:
@@ -151,8 +152,12 @@ class DocumentSearchService:
             if document_id is not None:
                 conditions.append(DocumentRecord.id == document_id)
             if metadata is not None:
-                conditions.extend(getattr(DocumentRecord, name) == value
-                                  for name, value in metadata.model_dump(exclude_none=True).items())
+                for name, value in metadata.model_dump(exclude_none=True).items():
+                    condition = getattr(DocumentRecord, name) == value
+                    # 聊天按类别找专门资料时，也保留未分类的综合攻略；管理端仍严格筛选。
+                    if name == "category" and include_general:
+                        condition = or_(condition, DocumentRecord.category.is_(None))
+                    conditions.append(condition)
             # 先在正文库筛出合法资料；无关及已停用资料不能挤占向量库的前200个候选。
             document_ids = list(unit.scalars(select(DocumentRecord.id).where(*conditions)))
             if not document_ids:
@@ -195,6 +200,21 @@ class DocumentSearchService:
                     if identifier not in rows:
                         continue
                     row, filename = rows[identifier]
+                    text = row.text.strip()
+                    if "\n" not in text and text.lstrip("# ") in row.section_path:
+                        # 标题只用来找到同一节的下一段正文，返回正文自己的编号及原文位置。
+                        # 不跨标题接续，避免把空标题误配到下一个景点。
+                        body = unit.scalar(select(DocumentChunkRecord).where(
+                            DocumentChunkRecord.document_id == row.document_id,
+                            DocumentChunkRecord.order == row.order + 1,
+                            DocumentChunkRecord.section_path == row.section_path,
+                        ))
+                        if body is None:
+                            continue
+                        body_text = body.text.strip()
+                        if "\n" not in body_text and body_text.lstrip("# ") in body.section_path:
+                            continue
+                        row = body
                     key = (row.document_id, row.text)
                     if key in seen:
                         continue

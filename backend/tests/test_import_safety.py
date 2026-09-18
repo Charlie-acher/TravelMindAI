@@ -75,7 +75,8 @@ import app.api.document.search
 import app.schemas.document.answer
 import app.services.document.answer
 import app.services.chat.rag
-import app.services.amap
+import app.services.baidu
+import app.services.baidu_mcp
 """
     result = subprocess.run(
         [sys.executable, "-c", program],

@@ -6,6 +6,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.exc import IntegrityError, OperationalError, ProgrammingError, SQLAlchemyError
 from starlette.exceptions import HTTPException
 
+from app.llm.budget import ModelInputLimitError
 from app.llm.client import ModelClientError
 from app.llm.embeddings import EmbeddingError
 from app.services.budget_service import BudgetValidationError
@@ -43,6 +44,13 @@ def error_response(
 
 
 def register_error_handlers(app: FastAPI) -> None:
+    """上下文超限处理函数：不截断必要旅行条件，保留原历史并明确本轮未完成。"""
+
+    @app.exception_handler(ModelInputLimitError)
+    async def input_too_large(request: Request, exc: ModelInputLimitError) -> JSONResponse:
+        return error_response(request, 413, "CONTEXT_TOO_LARGE",
+                              "本轮待处理内容过长，已保存的对话保持不变。请缩小这次查询范围。")
+
     """模型异常处理函数：返回模型不可用的错误。"""
 
     @app.exception_handler(ModelClientError)

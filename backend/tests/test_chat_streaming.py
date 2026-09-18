@@ -6,7 +6,7 @@ from unittest.mock import Mock
 
 import httpx
 import pytest
-from langchain_core.messages import AIMessageChunk
+from langchain_core.messages import AIMessage, AIMessageChunk
 from langchain_openai import ChatOpenAI
 from pydantic import SecretStr
 
@@ -37,35 +37,64 @@ def test_partial_json_only_exposes_public_answer() -> None:
     assert draft_text(raw) == ""
 
 
-"""真实分片测试函数：模型尚未结束时已推送公开草稿，最终 JSON 仍完整返回。"""
+"""结构调用测试函数：SSE页面也完整读取JSON，避免流式空白使检索被绕过。"""
 
-def test_model_streams_before_finish(monkeypatch: pytest.MonkeyPatch) -> None:
+
+@pytest.mark.parametrize("public", [False, True])
+def test_structured_json_uses_complete_response_in_sse(monkeypatch, public):
+    raw = '{"status":"answered","points":[{"source_ids":[1],"text":"杭州适合散步"}]}'
+    invoke = Mock(return_value=AIMessage(content=raw, response_metadata={"finish_reason": "stop"}))
+    stream = Mock(return_value=iter([
+        AIMessageChunk(content="   ", response_metadata={"finish_reason": "stop"}),
+    ]))
+    monkeypatch.setattr(ChatOpenAI, "invoke", invoke)
+    monkeypatch.setattr(ChatOpenAI, "stream", stream)
     received = []
-    raw = '{"status":"answered","points":[{"source_ids":[1],"text":"' + "杭州适合慢慢游览。" * 4
-
-    def chunks(self, messages, **kwargs):
-        yield AIMessageChunk(content=raw, additional_kwargs={"reasoning_content": "保密推理"})
-        assert received and received[-1][0] == "draft"
-        yield AIMessageChunk(content='"}]}', response_metadata={"finish_reason": "stop"})
-
-    monkeypatch.setattr(ChatOpenAI, "stream", chunks)
     token = event_sink.set(lambda event, data: received.append((event, data)))
     try:
-        with httpx.Client() as http, public_answer({1}):
+        with httpx.Client() as http:
             model = DeepSeekClient(Settings(deepseek_api_key=SecretStr("fake")), http)
-            result = model.generate_json([])
+            if public:
+                with public_answer({1}):
+                    result = model.generate_json([])
+            else:
+                result = model.generate_json([])
         assert json.loads(result)["points"]
-        assert "保密推理" not in str(received)
+        invoke.assert_called_once()
+        stream.assert_not_called()
+        assert not any(event == "draft" for event, _ in received)
     finally:
         event_sink.reset(token)
 
 
-"""截断测试函数：收到草稿不等于生成成功，缺少 stop 时仍抛出错误。"""
+"""文本分片测试函数：最终自然回答仍实时送入公开草稿区域。"""
 
-def test_truncated_stream_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(ChatOpenAI, "stream", lambda *args, **kwargs: iter([
-        AIMessageChunk(content="{}", response_metadata={"finish_reason": "length"}),
-    ]))
+
+def test_model_streams_before_finish(monkeypatch):
+    received = []
+
+    def chunks(self, messages, **kwargs):
+        yield AIMessageChunk(content="杭州适合慢慢游览。" * 4)
+        assert received[-1][0] == "draft"
+        yield AIMessageChunk(content="结束。", response_metadata={"finish_reason": "stop"})
+
+    monkeypatch.setattr(ChatOpenAI, "stream", chunks)
+    token = event_sink.set(lambda event, data: received.append((event, data)))
+    try:
+        with httpx.Client() as http:
+            model = DeepSeekClient(Settings(deepseek_api_key=SecretStr("fake")), http)
+            result = model.generate_text([])
+        assert result.endswith("结束。")
+    finally:
+        event_sink.reset(token)
+
+
+"""截断测试函数：完整JSON调用也必须确认正常结束，不能把截断结果当作成功。"""
+
+
+def test_truncated_json_is_rejected(monkeypatch):
+    monkeypatch.setattr(ChatOpenAI, "invoke", lambda *args, **kwargs:
+        AIMessage(content="{}", response_metadata={"finish_reason": "length"}))
     token = event_sink.set(lambda *args: None)
     try:
         with httpx.Client() as http, pytest.raises(ModelClientError, match="截断"):
@@ -83,15 +112,14 @@ def test_destination_gets_overview_then_natural_questions() -> None:
     )
     search, model = Mock(), Mock()
     search.search.return_value = SearchResult(items=[evidence()])
-    model.generate_json.return_value = json.dumps({"status": "answered", "points": [
-        {"text": "杭州湖滨步行街依傍西湖，适合散步。", "source_ids": [1]},
-    ]})
+    model.generate_text.return_value = "杭州湖滨适合散步。大概想玩几天，总预算约多少元？"
     result = ground_chat_response(response, search, model, "杭州")
     assert result.reply.startswith("杭州湖滨")
     assert "几天" in result.reply and "预算" in result.reply
     assert "几个人" not in result.reply and "请一起补充" not in result.reply
-    payload = json.loads(model.generate_json.call_args.args[0][1]["content"])
-    assert "简介" in payload["question"]
+    payload = json.loads(model.generate_text.call_args.args[0][1]["content"].split("\n", 1)[1])
+    assert model.generate_text.call_args.args[0][-1]["content"] == "我们两个人想去杭州"
+    assert payload["sources"] and "杭州" in search.search.call_args.args[0]
 
 
 """条件登记测试函数：只登记需求不应附加无关的无法确认结论。"""
@@ -103,7 +131,9 @@ def test_personal_conditions_do_not_get_failure_boilerplate() -> None:
     )
     search = Mock()
     search.search.return_value = SearchResult(items=[])
-    result = ground_chat_response(response, search, Mock(), "杭州")
+    model = Mock()
+    model.generate_text.return_value = "可以，我们来安排杭州。几个人、玩几天、总预算大约多少元？"
+    result = ground_chat_response(response, search, model, "杭州")
     assert "无法确认" not in result.reply
     assert "几个人" in result.reply and "几天" in result.reply and "预算" in result.reply
 
@@ -202,7 +232,7 @@ def test_stream_disconnect_keeps_worker_alive(monkeypatch) -> None:
 
     release, finished = Event(), Event()
 
-    def work(*args):
+    def work(*args, **kwargs):
         progress("test", "已经开始")
         assert release.wait(3)
         finished.set()
@@ -289,3 +319,22 @@ def test_stream_error_is_sanitized_and_never_done(monkeypatch, error, status) ->
         assert "provider-secret-key" not in result.text
         assert all(event != "done" for event, _ in events)
         service.append.assert_not_called()
+
+
+"""结构材料测试函数：历史保留角色顺序，但不能作为模型的自由文本输出示范。"""
+
+
+def test_json_history_is_data_not_assistant_examples(monkeypatch):
+    history = [{"role": "user", "content": "想去苏州"},
+               {"role": "assistant", "content": "苏州适合逛园林。"}]
+    current = {"role": "user", "content": "杭州有什么景点？"}
+    invoke = Mock(return_value=AIMessage(content='{}', response_metadata={"finish_reason": "stop"}))
+    monkeypatch.setattr(ChatOpenAI, "invoke", invoke)
+    with httpx.Client() as http:
+        DeepSeekClient(Settings(deepseek_api_key=SecretStr("fake")), http).generate_json([
+            {"role": "system", "content": "只分析并输出JSON"}, *history, current,
+        ])
+    sent = invoke.call_args.args[0]
+    assert not any(item["role"] == "assistant" for item in sent)
+    assert json.loads(sent[1]["content"].split("\n", 1)[1]) == history
+    assert sent[-1] == current

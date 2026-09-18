@@ -3,39 +3,27 @@
 import json
 from unittest.mock import Mock
 
-import httpx
 import pytest
 
-from app.config import Settings
-from app.services.amap import AmapClient
 from tests.helpers import evidence
+from tests.test_dining import map_service, restaurant
 
-"""定位测试函数：只保存有效坐标，入口位置与景点中心分开，消费不变成门票。"""
+"""定位测试函数：只保存有效百度坐标，景点中心不会冒充入口位置。"""
 
 
-@pytest.mark.parametrize("coordinate, expected", [("120.12,30.25", True),
-                                                 ("200,30", False), ("NaN,30", False)])
-def test_map_coordinates(coordinate: str, expected: bool) -> None:
-    """响应替身函数：返回同名同城景点及不同的坐标数据。"""
-
-    def handle(request: httpx.Request) -> httpx.Response:
-        if request.url.path == "/v3/config/district":
-            return httpx.Response(200, json={"status": "1", "districts": [{
-                "name": "杭州市", "level": "city", "adcode": "330100",
-                "citycode": "0571",
-            }]})
-        assert request.url.params["show_fields"] == "business,navi"
-        assert request.url.params["region"] == "330100"
-        return httpx.Response(200, json={"status": "1", "pois": [{
-            "id": "B001", "name": "湖滨路步行街", "cityname": "杭州市",
-            "location": coordinate, "address": "湖滨路",
-            "navi": {"entr_location": "120.13,30.26"}, "business": {"cost": "0"},
-        }]})
-    with httpx.Client(transport=httpx.MockTransport(handle)) as http:
-        result = AmapClient(Settings(amap_api_key="test"), http).lookup("杭州", "湖滨路步行街")
+@pytest.mark.parametrize("longitude, expected", [(120.12, True), (200, False),
+                                                 ("NaN", False), (True, False)])
+def test_map_coordinates(monkeypatch: pytest.MonkeyPatch,
+                         longitude: object, expected: bool) -> None:
+    poi = restaurant("4.8", name="湖滨路步行街", location={"lng": longitude, "lat": 30.25})
+    with map_service(monkeypatch, {"results": [poi]}) as maps:
+        result = maps.lookup("杭州", "湖滨路步行街")
     assert bool(result.location) == expected
-    assert result.entrance.longitude == 120.13
-    assert result.entrance.coordinate_system == "GCJ-02"
+    assert result.status == ("found" if expected else "no_match")
+    assert result.entrance is None
+    if expected:
+        assert result.location.longitude == 120.12
+        assert result.location.coordinate_system == "BD-09"
 
 
 """卡片测试函数：即使已有历史门票，也要定位；最终价格必须能对应证据原句。"""

@@ -72,7 +72,7 @@ def test_migration_round_trip_matches_models(migrated_database: tuple[Connection
     expected = {
         "sessions", "travel_requests", "itineraries", "requirement_turns", "documents",
         "document_chunks", "document_jobs",
-        "alembic_version", "users", "auth_sessions",
+        "alembic_version", "users", "auth_sessions", "conversation_attachments",
     }
     assert set(inspect(connection).get_table_names()) == expected
     differences = compare_metadata(MigrationContext.configure(connection), Base.metadata)

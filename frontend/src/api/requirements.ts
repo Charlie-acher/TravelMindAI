@@ -1,5 +1,6 @@
 /** 对话HTTP契约与请求封装；只访问自己的后端，不在前端保存DeepSeek密钥。 */
 import type { AnswerResult, GeoPoint, MapLookup } from './documents'
+import type { AttachmentSnapshot } from './attachments'
 import { ApiError, apiFetch, readResponse } from './http'
 export interface TravelRequirement {
   intent: string
@@ -19,6 +20,10 @@ export interface TravelRequirement {
   assumptions: string[]
 }
 
+/** 最近旅行话题与长对话摘要均由服务端保存；旧历史可以没有这些字段。 */
+export interface ConversationState { topic_cities: string[]; topic_places: string[] }
+export interface HistorySummary { text: string; covered_revision: number }
+
 /** 一次对话响应：文字回复用于左边聊天，结构化需求用于右边卡片。 */
 export interface ChatResponse {
   result: {
@@ -35,6 +40,37 @@ export interface ChatResponse {
   request_id: string
   knowledge?: AnswerResult | null // 历史响应可没有；新主聊天保存回答与引用原文快照。
   dining?: DiningResult | null // 餐馆及评分来自地图查询，随最终回答一起保存。
+  itinerary?: PlanSnapshot | null // 旧消息可没有；只展示最终提交的逐日行程。
+  conversation?: ConversationState | null
+  history_summary?: HistorySummary | null
+  attachments?: AttachmentSnapshot[] // 旧消息可没有；识别结果随本轮保存，恢复时不重跑模型。
+}
+
+/** 预算快照类型：金额以字符串传输，价格仅为演示估算。 */
+export interface BudgetSummary {
+  days: number; travelers: number; nights: number; rooms: number; lodging: string
+  total_budget: string; price_version: string; unit_prices: Record<string, string>; costs: Record<string, string>
+  subtotal: string; contingency_rate: string; contingency: string; total: string; remaining: string
+  over_budget: boolean; assumptions: string[]
+}
+export interface PlanSource { id: string; kind: 'knowledge' | 'web'; title: string; text: string; url: string | null }
+export interface PlanPlace { id: string; map: MapLookup; sources: PlanSource[] }
+export interface PlannedActivity {
+  place: PlanPlace; start_time: string; duration_minutes: number
+  transport: 'walk' | 'transit' | 'taxi'; transfer_minutes: number
+}
+export interface TravelPlan {
+  format: 'daily-plan-v1'; title: string; destination: string
+  days: { day: number; date: string | null; activities: PlannedActivity[] }[]
+  budget: BudgetSummary; warnings: string[]
+}
+export interface PlanSnapshot {
+  itinerary_id: string; version: number; previous_version: number | null
+  operation: 'create' | 'modify' | 'undo'; plan: TravelPlan; changes: string[]; can_undo: boolean
+}
+/** 撤销请求类型：网络失败保留整个请求，重试不能更换编号或版本。 */
+export interface UndoDraftRequest {
+  operation_id: string; target_message_id: string; expected_revision: number; expected_itinerary_version: number
 }
 
 /** 餐馆结果类型：旧历史可没有；距离是地图直线距离，人均仅作参考。 */
@@ -46,7 +82,8 @@ export interface DiningResult {
   status: 'found' | 'empty' | 'ratings_unavailable' | 'unconfigured' | 'error' | 'needs_clarification'
   items: DiningItem[]; anchor: MapLookup | null; radius_m: number
   preference: string | null; clarification: string | null
-  checked_at: string; provider: 'amap'; rating_missing_count: number
+  category?: 'dining' | 'lodging'; max_cost?: number | null
+  checked_at: string; provider: 'amap' | 'baidu'; rating_missing_count: number
 }
 
 /** 过程事件类型：只展示后端实际阶段和公开回答草稿，不接收推理或原始模型JSON。 */
@@ -122,7 +159,7 @@ export async function getModelStatus(): Promise<{ configured: boolean; model: st
 /** 一轮持久化对话；编号用于安全重试，revision用于防止覆盖更新过的历史。 */
 export interface SavedTurn { message_id: string; revision: number; response: ChatResponse }
 export interface ConversationHistory { session_id: string; revision: number; turns: SavedTurn[] }
-export interface PendingMessage { message: string; message_id: string; expected_revision: number }
+export interface PendingMessage { message: string; message_id: string; expected_revision: number; attachment_ids?: string[] }
 export interface SessionSummary { id: string; thread_id: string; title: string; status: string; created_at: string; updated_at: string }
 export interface SessionPage { items: SessionSummary[]; next_cursor: string | null }
 /** 历史列表来自当前账号的服务端分页，浏览器不负责用户隔离。 */
@@ -130,6 +167,19 @@ export async function listSessions(cursor: string | null = null): Promise<Sessio
   const params = new URLSearchParams({ limit: '30' })
   if (cursor) params.set('cursor', cursor)
   return readResponse(await apiFetch(`/api/v1/sessions?${params}`, { cache: 'no-store' }))
+}
+
+/** 会话改名函数：使用服务端返回的标题，不在浏览器单独保存名称。 */
+export async function renameSession(sessionId: string, title: string): Promise<SessionSummary> {
+  const result = await readResponse<{ session: SessionSummary }>(await apiFetch(`/api/v1/sessions/${encodeURIComponent(sessionId)}`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title }),
+  }))
+  return result.session
+}
+
+/** 会话删除函数：由后端校验当前账号归属，204表示整段历史已删除。 */
+export async function deleteSession(sessionId: string): Promise<void> {
+  await readResponse(await apiFetch(`/api/v1/sessions/${encodeURIComponent(sessionId)}`, { method: 'DELETE' }))
 }
 
 /** 沿用M1的会话创建接口；第一次发送时才创建，空白页面不会自动产生记录。 */
@@ -145,6 +195,14 @@ export async function createConversation(): Promise<string> {
 export async function readConversation(sessionId: string): Promise<ConversationHistory> {
   return readResponse(await apiFetch(`/api/v1/sessions/${encodeURIComponent(sessionId)}/requirement-messages`, {
     cache: 'no-store',
+  }))
+}
+
+/** 撤销函数：提交原样的操作编号和双版本，由服务器原子恢复上一版。 */
+export async function undoItinerary(sessionId: string, request: UndoDraftRequest): Promise<SavedTurn> {
+  return readResponse(await apiFetch(`/api/v1/sessions/${encodeURIComponent(sessionId)}/drafts/undo`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(request),
+    signal: AbortSignal.timeout(30_000),
   }))
 }
 

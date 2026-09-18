@@ -210,6 +210,19 @@ def test_readiness_checks_tables_and_shutdown_disposes_engine(
     assert app.state.trip_service is None
 
 
+"""附件迁移就绪测试函数：0011未应用时不能声称整个应用已就绪。"""
+
+@pytest.mark.postgres
+def test_readiness_requires_attachment_table(configured_settings: Settings,
+                                             store_engine: Engine) -> None:
+    with TestClient(create_app(configured_settings)) as client:
+        with store_engine.begin() as connection:
+            connection.execute(text("DROP TABLE conversation_attachments"))
+        response = client.get("/api/v1/health/ready")
+        assert response.status_code == 503
+        assert response.json()["error"]["code"] == "DATABASE_NOT_READY"
+
+
 """只注入数据库异常来验证HTTP映射；实际事务和约束已经由数据库集成测试覆盖。"""
 
 @pytest.mark.parametrize(

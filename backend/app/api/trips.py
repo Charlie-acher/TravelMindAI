@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 
 from app.api.auth import CurrentUser, require_session_owner
 from app.schemas.budget import BudgetSummary
@@ -17,6 +17,7 @@ from app.schemas.trip import (
     DraftView,
     SessionCreate,
     SessionPage,
+    SessionRename,
     SessionResponse,
     SessionView,
 )
@@ -99,6 +100,30 @@ def get_session(
     return SessionResponse(
         session=SessionView.model_validate(trip), request_id=request.state.request_id
     )
+
+
+"""会话改名接口函数：保存当前账号的标题，归属由存储事务校验。"""
+
+@router.patch("/{session_id}", response_model=SessionResponse, summary="重命名自己的会话")
+def rename_session(
+    session_id: UUID, body: SessionRename, request: Request,
+    service: TripServiceDependency, user: CurrentUser,
+) -> SessionResponse:
+    trip = service.rename_session(session_id, body.title, user_id=user.id)
+    return SessionResponse(
+        session=SessionView.model_validate(trip), request_id=request.state.request_id,
+    )
+
+
+"""会话删除接口函数：真实删除当前账号的整段对话、需求和行程版本。"""
+
+@router.delete("/{session_id}", status_code=204, summary="删除自己的整段会话")
+def delete_session(
+    session_id: UUID, service: TripServiceDependency, user: CurrentUser,
+) -> Response:
+    # 归属校验与删除放在同一事务，不依赖提前读取后可能改变的结果。
+    service.delete_session(session_id, user_id=user.id)
+    return Response(status_code=204)
 
 
 """草稿保存接口函数：计算预算并保存旅行需求和草稿。"""

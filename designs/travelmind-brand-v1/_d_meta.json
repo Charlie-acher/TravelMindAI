@@ -1,0 +1,19 @@
+{
+  "type": "design",
+  "designSystems": [],
+  "primaryDesignSystem": null,
+  "createdAt": "2026-09-17T03:10:56.395Z",
+  "updatedAt": "2026-09-17T03:37:10.280Z",
+  "assets": {
+    "TravelMindAI 品牌首页": {
+      "versions": [
+        {
+          "path": "index.html",
+          "createdAt": "2026-09-17T03:33:09.563Z",
+          "status": "needs-review",
+          "subtitle": "参考图青绿淡彩背景，仅背景变更"
+        }
+      ]
+    }
+  }
+}

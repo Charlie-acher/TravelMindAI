@@ -19,6 +19,50 @@ from app.services.document.search import DocumentSearchService
 from app.services.document.service import DocumentService
 from app.services.document.vector_store import MilvusStore
 
+"""标题回查测试函数：命中标题后返回同节正文，不误接下一景点，也不重复正文。"""
+
+
+def test_heading_hit_returns_own_body(store_engine: Engine, tmp_path: Path) -> None:
+    documents = DocumentService(store_engine, tmp_path, "owner-a")
+    saved = documents.upload(BytesIO(
+        ("# 杭州\n\n## 西湖\n\n杭州西湖适合散步。\n\n## 空标题\n\n"
+         "## 灵隐寺\n\n杭州灵隐寺位于山林。").encode()
+    ), "景点.md", "text/markdown")
+    chunks = documents.generate_chunks(saved.document.id).items
+    title = next(c for c in chunks if c.text.strip() == "## 西湖")
+    body = next(c for c in chunks if "适合散步" in c.text)
+    empty = next(c for c in chunks if c.text.strip() == "## 空标题")
+    vectors = SimpleNamespace(exists=lambda: True, search=lambda *a, **kw: [
+        (title.id, .9), (body.id, .8), (empty.id, .7)])
+    model = SimpleNamespace(embed=lambda _: SimpleNamespace(vectors=[[1., 0.]]))
+    result = DocumentSearchService(store_engine, vectors, model, "owner-a").search("西湖", 5)
+    assert [h.chunk.id for h in result.items] == [body.id]
+    assert result.items[0].chunk.text == body.text
+    assert result.items[0].score == .9
+
+
+"""专类检索测试函数：聊天同时保留综合攻略，排除其他类别和其他城市的资料。"""
+
+
+def test_category_can_include_general_guides(store_engine: Engine, tmp_path: Path) -> None:
+    documents = DocumentService(store_engine, tmp_path, "owner-a")
+    candidates = []
+    for city, category, text in [("杭州", "景点", "杭州西湖介绍"),
+                                 ("杭州", None, "杭州综合攻略"),
+                                 ("杭州", "餐馆", "杭州餐馆介绍"),
+                                 ("苏州", "景点", "苏州园林介绍")]:
+        saved = documents.upload(BytesIO(text.encode()), text + ".txt", "text/plain")
+        documents.update_metadata(saved.document.id, DocumentMetadata(city=city, category=category))
+        candidates.append(documents.generate_chunks(saved.document.id).items[0])
+    vectors = SimpleNamespace(exists=lambda: True, search=lambda *a, **kw: [
+        (c.id, .9) for c in candidates if c.document_id in kw['document_ids']])
+    model = SimpleNamespace(embed=lambda _: SimpleNamespace(vectors=[[1., 0.]]))
+    service = DocumentSearchService(store_engine, vectors, model, "owner-a")
+    metadata = DocumentMetadata(city="杭州", category="景点")
+    assert len(service.search("杭州", 5, metadata=metadata).items) == 1
+    result = service.search("杭州", 5, metadata=metadata, include_general=True)
+    assert [h.chunk.id for h in result.items] == [c.id for c in candidates[:2]]
+
 """字段校验测试函数：拒绝旧标签和非法类别，空白城市保存为空。"""
 
 def test_metadata_validation() -> None:

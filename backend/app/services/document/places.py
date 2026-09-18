@@ -71,8 +71,12 @@ def prepare_attractions(
 
 def clear_ticket_claims(item: AttractionDraft) -> None:
     for field in ("description", "reason"):
-        if re.search(r"门票|票价|免费|收费|\d+\s*元", getattr(item, field)):
-            setattr(item, field, f"可先了解{item.name}，具体收费信息尚未核实。")
+        body = getattr(item, field)
+        if re.search(r"门票|票价|免费|收费|\d+\s*元", body):
+            # 只移除涉及收费的完整句子，保留已检索到的其他介绍，不把整段变成提示语。
+            kept = "".join(sentence for sentence in re.split(r"(?<=[。！？；\n])", body)
+                           if not re.search(r"门票|票价|免费|收费|\d+\s*元", sentence)).strip()
+            setattr(item, field, kept or f"可先了解{item.name}，具体收费信息尚未核实。")
 
 
 """地址清理函数：补充地址未通过时，也移除正文中的地址或门牌描述。"""

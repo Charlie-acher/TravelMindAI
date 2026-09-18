@@ -28,14 +28,15 @@ build/
 *.log
 .worktrees/
 
-# 未来模块的运行数据可能包含上传文档和聊天内容，不能进入版本库。
-# data/fixtures 和 data/evals 没有被忽略，便于提交脱敏的测试材料。
-# **同时覆盖项目根目录和backend下的实际资料目录。
-**/data/uploads/
-**/data/runtime/
-data/milvus/
-data/postgres/
-data/checkpoints/
+# 日志、检测报告、验收临时文件及本机上传原文统一存放，不提交Git。
+/temp/
+# 数据集只保存在本机；data目录只允许chinatravel和lvbangpt。
+/data/
+/backend/data/
+/backend/evals/reports/
+
+# 固定评测输入 backend/evals/*.json 需要提交；只有生成的报告应被忽略。
+# 本地数据库及其事务日志不提交。
 *.db
 *.db-shm
 *.db-wal
