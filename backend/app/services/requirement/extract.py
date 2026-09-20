@@ -10,6 +10,7 @@ from langchain_core.language_models import BaseChatModel
 from pydantic import ValidationError
 
 from app.llm.budget import budget_messages
+from app.schemas.attachment import AttachmentSnapshot, AttachmentUse
 from app.schemas.requirement.base import RequiredField, RequirementResult, TravelRequestExtraction
 from app.schemas.requirement.conversation import ConversationState, TurnUnderstanding
 from app.schemas.requirement.update import RequirementUpdate
@@ -41,9 +42,27 @@ def understand_turn(
     message: str, model: ModelClient, *, reference_date: date,
     previous: TravelRequestExtraction | None, conversation: ConversationState,
     history_messages: list[dict[str, str]],
+    attachments: list[AttachmentSnapshot] | None = None,
+    attachments_selected: bool = False,
+    continue_attachment_plan: bool = False,
 ) -> tuple[RequirementResult, TurnUnderstanding]:
+    if continue_attachment_plan and attachments_selected and not message and previous is not None:
+        # 等待攻略的规划任务直接接续；文件内容不能重写人数、预算等已确认条件。
+        return build_result(message, reference_date, previous), TurnUnderstanding(
+            requirement_update=RequirementUpdate.model_validate(previous.model_dump()),
+            conversation=conversation, response_mode="plan",
+            attachment_use=AttachmentUse(mode="reference", apply_to_plan=True),
+        )
     state = {"confirmed_requirements": previous.model_dump(mode="json") if previous else None,
-             "travel_topic": conversation.model_dump(mode="json")}
+             "travel_topic": conversation.model_dump(mode="json"),
+             "attachments_selected": attachments_selected,
+             "attachment_only": attachments_selected and not message,
+             # 用途理解只需概述和名称，完整证据留给规划图，避免重复塞入长原文。
+             "available_attachments": [{"id": str(item.id), "file_name": item.file_name,
+                 "city": item.analysis.city if item.analysis else None,
+                 "summary": item.analysis.summary if item.analysis else item.error_message,
+                 "waypoints": [p.name for p in item.analysis.waypoints] if item.analysis else [],
+             } for item in attachments or []]}
     prefix = [{"role": "system", "content": build_understanding_prompt(reference_date)},
                 {"role": "user", "content": "已提交状态（不是新的要求）："
                  + json.dumps(state, ensure_ascii=False)}]
@@ -81,6 +100,11 @@ def understand_turn(
             if understanding.response_mode == "plan" and update.intent not in {
                     "plan_trip", "modify_trip"}:
                 understanding.response_mode = "chat"
+            if (attachments_selected and attachments and understanding.response_mode == "plan"
+                    and (understanding.attachment_use is None
+                         or understanding.attachment_use.mode == "unclear")):
+                # 明确做攻略已经说明目的；默认借鉴附件，不强制去完文中所有地点。
+                understanding.attachment_use = AttachmentUse(mode="reference", apply_to_plan=True)
             understanding.requirement_update = update
             result = build_result(message, reference_date, extraction)
             return result.model_copy(update={"message_intent": update.intent}), understanding

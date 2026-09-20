@@ -417,12 +417,12 @@ onBeforeUnmount(() => { window.removeEventListener('travelmind:unauthorized', un
           <img v-if="message.role === 'assistant'" class="message-avatar" src="/brand/logo-mark.svg" alt="" /><div class="message-content"><span class="message-name">{{ message.role === 'assistant' ? 'TravelMind AI' : '你' }}</span>
             <ThinkingProcess v-if="message.process" :steps="message.process.steps" :seconds="message.process.seconds" />
             <AttachmentCards v-if="message.role === 'user' && sessionId && message.attachments?.length" class="user-attachments" :session-id="sessionId" :items="message.attachments" originals-only />
-            <div v-if="message.role === 'assistant'" class="message-bubble markdown-answer" v-html="renderMarkdown(message.text)" /><div v-else class="message-bubble">{{ message.text }}</div><AttractionCards v-if="message.role === 'assistant' && message.attractions?.length" :items="message.attractions" />
+            <div v-if="message.role === 'assistant'" class="message-bubble markdown-answer" v-html="renderMarkdown(message.text)" /><div v-else-if="message.text" class="message-bubble">{{ message.text }}</div><AttractionCards v-if="message.role === 'assistant' && message.attractions?.length" :items="message.attractions" />
             <p v-if="message.attractions?.length && message.knowledge?.clarification && !message.text.includes(message.knowledge.clarification)" class="answer-followup">{{ message.knowledge.clarification }}</p>
             <RestaurantCards v-if="message.role === 'assistant' && message.restaurants?.length" :items="message.restaurants" :category="message.nearby?.category" :provider="message.nearby?.provider" />
-            <ItineraryCard v-if="message.role === 'assistant' && message.itinerary" :snapshot="message.itinerary" :undo-available="message.messageId === undoTarget && !pendingUndo" :busy="busy || restoreFailed || !!deletingId" @undo="undo(message.messageId!)" />
+            <ItineraryCard v-if="message.role === 'assistant' && message.itinerary" :snapshot="message.itinerary" :origin="message.origin" :undo-available="message.messageId === undoTarget && !pendingUndo" :busy="busy || restoreFailed || checkingAuth || !!deletingId || !!renamingId" @undo="undo(message.messageId!)" @query="input = $event" />
             <AnswerSources v-if="message.role === 'assistant' && message.knowledge" :knowledge="message.knowledge" />
-            <AttachmentCards v-if="message.role === 'assistant' && sessionId && message.attachments?.length" :session-id="sessionId" :items="message.attachments" />
+            <AttachmentCards v-if="message.role === 'assistant' && sessionId && message.attachments?.length" :session-id="sessionId" :items="message.attachments" :use="message.attachmentUse" :planned="!!message.itinerary" />
             <span v-if="message.failed" class="failed-note">本条未确认保存，可重试或重新读取</span></div></div>
           <div v-if="restoring" class="thinking" role="status"><span class="thinking-dot" />正在读取已保存对话…</div>
           <div v-else-if="busy" class="message-row assistant stream-message">
@@ -451,7 +451,7 @@ onBeforeUnmount(() => { window.removeEventListener('travelmind:unauthorized', un
             <p>PDF 最大30MB · 其他文件最大10MiB<br />PDF、DOCX、PNG/JPG/WebP、TXT、Markdown<br />每条最多3份 · 仅用于当前对话</p>
             <div class="upload-tip">也可将文件拖入输入框</div>
           </div>
-          <p v-if="selectedAttachments.length" class="composer-note">可继续补充要求；本轮读取附件，不修改行程。</p>
+          <p v-if="selectedAttachments.length" class="composer-note">可说明附件用途：供参考、这些点都要去，或替换第几天。</p>
           <p v-if="!emptyChat" class="composer-note">AI 生成内容仅供参考，请核实出行信息。</p>
         </div>
       </section>

@@ -38,7 +38,7 @@ def test_heading_hit_returns_own_body(store_engine: Engine, tmp_path: Path) -> N
     result = DocumentSearchService(store_engine, vectors, model, "owner-a").search("西湖", 5)
     assert [h.chunk.id for h in result.items] == [body.id]
     assert result.items[0].chunk.text == body.text
-    assert result.items[0].score == .9
+    assert result.items[0].score > 0  # 对外返回混合排名分，不再返回向量余弦值。
 
 
 """专类检索测试函数：聊天同时保留综合攻略，排除其他类别和其他城市的资料。"""

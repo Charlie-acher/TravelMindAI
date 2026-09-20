@@ -146,11 +146,11 @@ def test_invalid_map_choice_continues_retrieval(monkeypatch, invalid_arguments):
     assert references["sources"]
 
 
-"""行程输出失败测试函数：内部格式失败仍返回带检索资料的建议，不提交假行程。"""
+"""行程输出失败测试函数：明确说明草稿未完成，不用自由回答冒充规划成功。"""
 
 
 @pytest.mark.parametrize("invalid_arguments", [False, True])
-def test_invalid_plan_choice_continues_retrieval(monkeypatch, invalid_arguments):
+def test_invalid_plan_choice_requests_retry(monkeypatch, invalid_arguments):
     from app.llm.client import ModelOutputError
     from tests.helpers import evidence
 
@@ -173,8 +173,9 @@ def test_invalid_plan_choice_continues_retrieval(monkeypatch, invalid_arguments)
                                       expected_revision=0)
     result = process_saved_message(history.session_id, payload, model, service, "plan-fallback",
                                   nullcontext(search), Mock())
-    assert result.response.reply == model.generate_text.return_value
+    assert "重试" in result.response.reply
+    assert result.response.status == "needs_clarification"
+    assert result.response.result.extraction.destination == "杭州"
     assert result.response.itinerary is None
-    assert search.search.called
-    references = json.loads(model.generate_text.call_args.args[0][1]["content"].split("\n", 1)[1])
-    assert references["sources"]
+    search.search.assert_not_called()
+    model.generate_text.assert_not_called()

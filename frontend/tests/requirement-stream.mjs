@@ -117,6 +117,56 @@ try {
   const storage = new Map()
   globalThis.sessionStorage = { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value), removeItem: key => storage.delete(key) }
   globalThis.window = Object.assign(new EventTarget(), { setTimeout, clearTimeout })
+  // 用可推进的时钟验证真实请求信号：附件最长15分钟，普通进度不延长3分钟上限。
+  const originalNow = Date.now
+  let now = 0
+  const timers = new Map()
+  let timerId = 0
+  Date.now = () => now
+  window.setTimeout = (callback, delay) => { const id = ++timerId; timers.set(id, { callback, at: now + delay }); return id }
+  window.clearTimeout = id => timers.delete(id)
+  const advance = time => { now = time; for (const [id, timer] of timers) if (timer.at <= now) { timers.delete(id); timer.callback() } }
+  try {
+    for (const mode of ['ordinary', 'attached', 'reuse', 'success']) {
+      now = 0
+      let timeoutController
+      let requestSignal
+      globalThis.fetch = async (_url, init) => {
+        requestSignal = init.signal
+        return streamResponse(new ReadableStream({ start(controller) {
+          timeoutController = controller
+          init.signal.addEventListener('abort', () => controller.error(new DOMException('Aborted', 'AbortError')), { once: true })
+        } }))
+      }
+      const waiting = sendRequirement('timeout-session', { message: '继续处理', message_id: `timeout-${mode}`, expected_revision: 0, attachment_ids: mode === 'attached' ? ['pdf-id'] : [] }, () => {})
+      await nextEvent()
+      advance(60_000)
+      timeoutController.enqueue(encoder.encode(frame('progress', { stage: mode === 'reuse' ? 'attachment' : 'plan_choose', message: '正在处理' })))
+      await nextEvent()
+      advance(120_000)
+      if (mode === 'reuse') {
+        timeoutController.enqueue(encoder.encode(frame('progress', { stage: 'attachment', message: '继续处理附件' })))
+        await nextEvent()
+      }
+      if (mode === 'success') {
+        timeoutController.enqueue(encoder.encode(frame('done', saved)))
+        await waiting
+        assert.equal(timers.size, 0, '完成后清除请求定时器')
+        continue
+      }
+      const rejected = assert.rejects(waiting, /等待回复超时/)
+      advance(180_000)
+      assert.equal(requestSignal.aborted, mode === 'ordinary', '仅附件请求可超过180秒')
+      if (mode !== 'ordinary') {
+        advance(899_999)
+        assert.equal(requestSignal.aborted, false)
+        advance(900_000)
+        assert.equal(requestSignal.aborted, true, '附件处理总上限15分钟，进度不能无限续期')
+      }
+      await rejected
+      assert.equal(timers.size, 0, '超时后清除请求定时器')
+    }
+  } finally { Date.now = originalNow; window.setTimeout = setTimeout; window.clearTimeout = clearTimeout }
   const { useRequirementConversation } = await server.ssrLoadModule('/src/useRequirementConversation.ts')
   // 新会话创建也可能等待网络：点击时清空，失败恢复；后续新草稿不能被旧请求覆盖。
   const creating = useRequirementConversation()
@@ -223,10 +273,37 @@ try {
       budget: { days: 2, travelers: 2, nights: 1, rooms: 1, lodging: 'economy', total_budget: '5000.00', price_version: 'demo-cny-v1',
         unit_prices: {}, costs: { accommodation: '200.00', intercity_transport: '600.00' }, subtotal: '800.00', contingency_rate: '0.10', contingency: '80.00', total: '880.00', remaining: '4120.00', over_budget: false, assumptions: ['标准演示单价'] }, warnings: ['路线耗时待核实'] }, changes: ['第2天减少一个景点'] }
   const { default: ItineraryCard } = await server.ssrLoadModule('/src/components/ItineraryCard.vue')
-  const card = await renderToString(createSSRApp({ render: () => h(ItineraryCard, { snapshot, undoAvailable: true, busy: false }) }))
+  const card = await renderToString(createSSRApp({ render: () => h(ItineraryCard, { snapshot, origin: '上海', undoAvailable: true, busy: false }) }))
+  for (const expected of ['上海', '2 天', '1 晚', '2 人同行', '日期待定', '整程展开']) assert.ok(card.includes(expected), expected)
+  assert.ok(!card.includes('杭州两日慢游'), '以起终点代替宣传标题')
   for (const expected of ['第 1 天', '第 2 天', '09:00', 'api.map.baidu.com/marker', 'coord_type=gcj02', '适合沿湖散步', '城际交通', '非实时', '撤销这次修改']) assert.ok(card.includes(expected), expected)
   assert.ok(!(await renderToString(createSSRApp({ render: () => h(ItineraryCard, { snapshot, undoAvailable: false, busy: false }) }))).includes('撤销这次修改'))
-  const planTurn = { ...saved, message_id: 'plan-message', revision: 3, response: { ...saved.response, status: 'complete', itinerary: snapshot } }
+  for (const expected of ['继续查询', '查询天气', '第 1 天路线', '第 2 天路线', '门票、机票、火车票待查询', 'https://www.12306.cn/index/', 'https://www.airchina.com.cn/zh-CN']) assert.ok(card.includes(expected), expected)
+  for (const dated of [false, true]) {
+    for (const blocked of [false, true]) {
+      const queries = []
+      let queryState
+      const querySnapshot = structuredClone(snapshot)
+      querySnapshot.plan.days[0].activities.push({ ...querySnapshot.plan.days[0].activities[0], place: { ...querySnapshot.plan.days[0].activities[0].place, map: { city: '杭州', name: '灵隐寺', matched_name: '灵隐景区', status: 'no_match' } } })
+      if (dated) querySnapshot.plan.days.forEach((day, index) => { day.date = `2026-10-0${index + 1}` })
+      const queryApp = createSSRApp(ItineraryCard, { snapshot: querySnapshot, undoAvailable: false, busy: blocked, onQuery: question => queries.push(question) })
+      queryApp.mixin({ created() { if (this.$options.__name === 'ItineraryCard') queryState = this.$.setupState } })
+      const queryHtml = await renderToString(queryApp)
+      assert.ok(queryHtml.includes('出发地待定'), '旧历史缺失出发地时不编造城市')
+      assert.ok(queryHtml.includes(dated ? '2026-10-01 — 2026-10-02' : '日期待定'), '标题日期来自本份行程')
+      assert.equal((queryHtml.match(/ disabled/g) ?? []).length, blocked ? 3 : 0, '忙碌时禁用天气和逐日路线按钮')
+      queryState.queryWeather()
+      queryState.queryRoute(querySnapshot.plan.days[0])
+      if (blocked) assert.deepEqual(queries, [])
+      else {
+        assert.match(queries[0], /杭州.*天气/)
+        if (dated) { assert.match(queries[0], /2026-10-01/); assert.match(queries[0], /2026-10-02/) }
+        else assert.match(queries[0], /请先.*确认.*日期/)
+        assert.match(queries[1], /杭州.*第1天.*西湖 → 灵隐景区.*怎么走.*耗时/)
+      }
+    }
+  }
+  const planTurn = { ...saved, message_id: 'plan-message', revision: 3, response: { ...saved.response, status: 'complete', itinerary: snapshot, result: { ...saved.response.result, extraction: { origin: '上海' } } } }
   assert.deepEqual((await readRequirementStream(chunks(frame('done', planTurn), 7), () => {})).response.itinerary, snapshot)
   // 新行程完成后先露出标题；旧行程之后的流式进度仍跟随底部。
   const scrollingState = useRequirementConversation()
@@ -239,6 +316,7 @@ try {
   globalThis.fetch = async () => Response.json({ session_id: 'scroll-session', revision: 3, turns: [planTurn] })
   await scrollingState.reloadConversation()
   await nextEvent()
+  assert.equal(scrollingState.messages.value.find(message => message.itinerary)?.origin, '上海', '历史草稿保留本轮出发城市')
   assert.equal(scrolls.at(-1), 388, '最终行程顶部留12px边距')
   scrollingState.input.value = '第二天晚一点'
   globalThis.fetch = async () => streamResponse(new ReadableStream({ start(value) { controller = value } }))
@@ -408,17 +486,26 @@ try {
   const originalConfirm = Modal.confirm
   const row = { id: 'history-to-delete', title: '待删除历史', updated_at: '2026-09-16T00:00:00Z' }
   let pageState
+  let pageItinerary
   const pageApp = createSSRApp(App)
   pageApp.mixin({ created() {
+    if (this.$options.__name === 'ItineraryCard') pageItinerary = this.$.setupState
     if (this.$options.__name !== 'App') return
     pageState = this.$.setupState
     pageState.account = { id: 'page-account', username: '测试账号', role: 'user' }
     pageState.modelState = 'configured'
     pageState.sessions = [row]
     pageState.messages = [{ id: 'welcome', role: 'assistant', text: '欢迎' },
-      { id: 'card-answer', role: 'assistant', text: '这是餐馆总体建议。', restaurants: [restaurant], nearby: saved.response.dining }]
+      { id: 'card-answer', role: 'assistant', text: '这是餐馆总体建议。', restaurants: [restaurant], nearby: saved.response.dining, itinerary: snapshot }]
   } })
   const historyHtml = await renderToString(pageApp)
+  let queryRequests = 0
+  globalThis.fetch = async () => { ++queryRequests; throw new Error('查询入口不能自动请求') }
+  pageItinerary.queryWeather()
+  assert.match(pageState.input, /杭州.*天气/)
+  pageItinerary.queryRoute(snapshot.plan.days[0])
+  assert.match(pageState.input, /杭州.*第1天.*西湖.*怎么走.*耗时/)
+  assert.equal(queryRequests, 0, '行程查询事件只填输入区，不自动发送')
   assert.ok(historyHtml.includes('待删除历史：更多操作'), '历史操作集中在三点菜单')
   assert.ok(historyHtml.includes('这是餐馆总体建议。'), '带卡片的最终正文仍需单独渲染')
   assert.ok(historyHtml.includes('测试餐馆'), '最终正文之后继续渲染结构化卡片')

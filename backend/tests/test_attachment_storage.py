@@ -246,9 +246,14 @@ def test_http_ownership_and_protected_download(store_engine, tmp_path):
 """PDF边界测试函数：30MB可进入解析，多一个字节拒绝，其他格式仍限制10MiB。"""
 
 def test_pdf_size_boundary(monkeypatch):
+    from types import SimpleNamespace
+
     parsed = []
-    monkeypatch.setattr("app.services.attachment.storage.parse_document",
-                        lambda content, suffix: parsed.append(len(content)))
+    def read_pdf(stream):
+        parsed.append(len(stream.getvalue()))
+        return SimpleNamespace(is_encrypted=False, pages=[object()])
+
+    monkeypatch.setattr("app.services.attachment.storage.PdfReader", read_pdf)
     content = b"%PDF-" + b" " * (30_000_000 - 5)
     assert validate_upload(BytesIO(content), "route.PDF", "application/pdf")[0] == content
     assert parsed == [30_000_000]

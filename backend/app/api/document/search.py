@@ -32,7 +32,7 @@ def build_index(document_id: UUID, service: SearchDependency) -> IndexProgress:
     return service.index_batch(document_id)
 
 
-"""资料搜索接口函数：将一句问题转成向量，返回有文件名和位置的原文证据。"""
+"""资料搜索接口函数：混合文字和语义检索，返回有文件名和位置的原文证据。"""
 
 
 @router.post("/document-search", response_model=SearchResult)

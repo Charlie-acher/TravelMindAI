@@ -1,0 +1,23 @@
+{
+  "type": "design",
+  "designSystems": [],
+  "primaryDesignSystem": null,
+  "assets": {
+    "TravelMindAI 旅行草稿": {
+      "versions": [
+        {
+          "path": "index.html",
+          "createdAt": "2026-09-20T07:32:44.031Z",
+          "status": "approved",
+          "subtitle": "放大起终点与出行信息，已接入正式组件",
+          "viewport": {
+            "width": 1440,
+            "height": 1000
+          }
+        }
+      ]
+    }
+  },
+  "createdAt": "2026-09-20T07:32:44.031Z",
+  "updatedAt": "2026-09-20T07:57:53.360Z"
+}

@@ -25,6 +25,7 @@ from app.schemas.requirement.history import (
     SavedRequirementMessage,
     SavedRequirementTurn,
 )
+from app.services.attachment.mineru import MinerUClient
 from app.services.attachment.reader import AttachmentReader
 from app.services.baidu import BaiduMaps
 from app.services.chat.events import event_sink
@@ -94,8 +95,13 @@ def send_saved_message(
             contextmanager(get_search_service)(request),
             maps,
             WebSearchClient(request.app.state.settings, map_http),
-            attachments=AttachmentReader(get_attachment_service(request), model,
-                lambda: QwenVisionClient(request.app.state.settings, map_http))
+            attachments=AttachmentReader(get_attachment_service(request),
+                DeepSeekClient(request.app.state.settings, map_http, max_output_tokens=8192)
+                    if request.app.state.settings.mineru_base_url else model,
+                lambda: QwenVisionClient(request.app.state.settings, map_http),
+                MinerUClient(str(request.app.state.settings.mineru_base_url), map_http,
+                    request.app.state.settings.mineru_timeout_seconds)
+                    if request.app.state.settings.mineru_base_url else None)
                 if payload.attachment_ids else None,
         )
 
@@ -136,8 +142,12 @@ async def stream_saved_message(
                     session_id, payload, model, service,
                     request.state.request_id, contextmanager(get_search_service)(request),
                     maps, WebSearchClient(settings, http),
-                    attachments=AttachmentReader(get_attachment_service(request), model,
-                        lambda: QwenVisionClient(settings, http))
+                    attachments=AttachmentReader(get_attachment_service(request),
+                        DeepSeekClient(settings, http, max_output_tokens=8192)
+                            if settings.mineru_base_url else model,
+                        lambda: QwenVisionClient(settings, http),
+                        MinerUClient(str(settings.mineru_base_url), http,
+                            settings.mineru_timeout_seconds) if settings.mineru_base_url else None)
                         if payload.attachment_ids else None,
                 )
                 loop.call_soon_threadsafe(enqueue, "done", turn.model_dump(mode="json"))

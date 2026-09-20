@@ -8,10 +8,10 @@ import {
 } from './api/requirements'
 import { ApiError } from './api/http'
 import type { AnswerResult, AttractionCard } from './api/documents'
-import { listAttachments, uploadAttachment, type AttachmentSnapshot } from './api/attachments'
+import { listAttachments, uploadAttachment, type AttachmentSnapshot, type AttachmentUse } from './api/attachments'
 
 /** 消息类型：气泡只展示自然语言，知识依据由后端保存和校验。 */
-interface ChatMessage { id: string; role: 'user' | 'assistant'; text: string; failed?: boolean; attachments?: AttachmentSnapshot[]; knowledge?: AnswerResult | null; attractions?: AttractionCard[]; restaurants?: DiningItem[]; nearby?: DiningResult | null; clarification?: string | null; itinerary?: PlanSnapshot | null; messageId?: string; process?: { steps: { stage: string; message: string }[]; draft: string; seconds: number } }
+interface ChatMessage { origin?: string | null; id: string; role: 'user' | 'assistant'; text: string; failed?: boolean; attachments?: AttachmentSnapshot[]; attachmentUse?: AttachmentUse | null; knowledge?: AnswerResult | null; attractions?: AttractionCard[]; restaurants?: DiningItem[]; nearby?: DiningResult | null; clarification?: string | null; itinerary?: PlanSnapshot | null; messageId?: string; process?: { steps: { stage: string; message: string }[]; draft: string; seconds: number } }
 const legacyStorageKey = 'travelmind.requirement-conversation.v1'
 const welcome = '你好，想去哪里旅行？\n你可以告诉我时间、人数和预算，也可以先问问感兴趣的地方。无法确认的信息，我会直接说明。'
 
@@ -117,9 +117,10 @@ export function useRequirementConversation() {
       ...(turn.response.knowledge?.web_search?.items.map(source => source.id) ?? []),
     ])
     const reply = turn.response.reply.replace(/ ?\[(\d+)\]/g, (match, id: string) => references.has(Number(id)) ? '' : match)
+    // 出发地跟随本轮快照，后续修改城市不能改写旧草稿的标题。
     messages.value.push(
       { id: `${turn.message_id}-user`, role: 'user', text: turn.response.result.original_message, attachments: turn.response.attachments ?? [] },
-      { id: `${turn.message_id}-assistant`, messageId: turn.message_id, role: 'assistant', text: reply, attachments: turn.response.attachments ?? [], knowledge: turn.response.knowledge, attractions: turn.response.knowledge?.attractions ?? [], restaurants: turn.response.dining?.items ?? [], nearby: turn.response.dining, clarification: turn.response.knowledge?.clarification, itinerary: turn.response.itinerary },
+      { id: `${turn.message_id}-assistant`, messageId: turn.message_id, role: 'assistant', text: reply, attachmentUse: turn.response.attachment_use, attachments: turn.response.attachments ?? [], knowledge: turn.response.knowledge, attractions: turn.response.knowledge?.attractions ?? [], restaurants: turn.response.dining?.items ?? [], nearby: turn.response.dining, clarification: turn.response.knowledge?.clarification, itinerary: turn.response.itinerary, origin: turn.response.result.extraction?.origin ?? null },
     )
     if (turn.response.status === 'needs_clarification' || turn.response.status === 'complete') response.value = turn.response
     else if (response.value) response.value = { ...response.value, changed_fields: [] }
@@ -210,14 +211,15 @@ export function useRequirementConversation() {
 
   /** 成功保存才更新需求卡片；超时或断网保留原话和同一个消息编号。 */
   async function send(): Promise<void> {
-    const text = input.value.trim() || (selectedAttachments.value.length ? '请帮我读取这些附件' : '')
-    if (!text || busy.value || uploading.value || restoreFailed.value) return
+    const text = input.value.trim()
+    if ((!text && !selectedAttachments.value.length) || busy.value || uploading.value || restoreFailed.value) return
     const attachments = [...selectedAttachments.value]
     const attachmentIds = attachments.map(item => item.id)
     if (pendingUndo.value) { error.value = '上次撤销尚未确认保存，请先重试撤销。'; return }
     sending.value = true
-    // 原话由本次请求和pending保存，输入框立即留给下一条消息。
+    // 原话和附件由本次请求保存，输入框立即留给下一条消息。
     input.value = ''
+    selectedAttachments.value = []
     const startedAt = Date.now()
     clearStream()
     const token = generation
@@ -251,12 +253,14 @@ export function useRequirementConversation() {
       const assistant = messages.value.at(-1)
       if (assistant) assistant.process = { steps: [...progress.value], draft: draft.value, seconds: Math.max(1, Math.round((Date.now() - startedAt) / 1000)) }
       pending = null
-      selectedAttachments.value = []
       remember()
     } catch (cause) {
       if (token !== generation) return
-      // 失败时恢复原话方便重试，但不能覆盖用户新写的草稿。
-      if (!input.value) input.value = text
+      // 失败时整批恢复方便重试，不能覆盖或混入用户新写的草稿。
+      if (!input.value && !selectedAttachments.value.length) {
+        input.value = text
+        selectedAttachments.value = attachments
+      }
       const failed = messages.value.find(item => item.id === `${pending?.message_id}-user`)
       if (failed) failed.failed = true
       if (cause instanceof ApiError && cause.status === 409) {

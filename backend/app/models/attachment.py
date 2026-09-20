@@ -48,5 +48,6 @@ class ConversationAttachment(Base):
     size_bytes: Mapped[int]  # 单位为字节，PDF最多30MB，其他附件最多10MiB。
     status: Mapped[str] = mapped_column(String(30), server_default="uploaded")
     analysis_json: Mapped[dict[str, JsonValue] | None] = mapped_column(JSONB(none_as_null=True))
+    parsed_json: Mapped[dict[str, JsonValue] | None] = mapped_column(JSONB(none_as_null=True))
     error_message: Mapped[str | None] = mapped_column(String(500))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

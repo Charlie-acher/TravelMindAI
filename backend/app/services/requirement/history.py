@@ -180,6 +180,7 @@ class RequirementHistoryService:
                     or saved.revision != expected_revision + 1
                     or [item.id for item in saved.response.attachments]
                     != [item.id for item in response.attachments]
+                    or saved.response.attachment_request_ids != response.attachment_request_ids
                 ):
                     raise HistoryConflictError("消息编号已用于其他提交，请重新读取会话")
                 return saved
@@ -242,7 +243,9 @@ class RequirementHistoryService:
             unit.add(row)
             # 首次成功消息与标题一起提交，不额外调用模型；失败不修改标题。
             if revision == 0 and trip.title in {"新建对话", "旅行需求对话"}:
-                trip.title = " ".join(response.result.original_message.split())[:40]
+                title = response.result.original_message or (
+                    response.attachments[0].file_name if response.attachments else trip.title)
+                trip.title = " ".join(title.split())[:40]
             # 与对话记录在同一事务提交，异常时不会留半条消息或占用轮次。
             trip.updated_at = func.clock_timestamp()
             unit.flush()

@@ -21,6 +21,7 @@ dependencies = [
     "openai>=2,<3", # LangChain底层SDK；代码直接使用其超时、连接和状态异常类型。
     "python-multipart>=0.0.22,<1", # 解析浏览器FormData上传；实际文件内容仍由业务层检查。
     "pypdf>=6.18.1,<7", # 读取有文字层的PDF，并保留从1开始的物理页码。
+    "pypdfium2>=5,<6", # 文字层损坏或扫描PDF按实际页面渲染，供百炼视觉读取。
     "python-docx>=1.2,<2", # 按正文顺序读取DOCX段落和表格，不需要安装Word。
     "argon2-cffi>=25.1,<26",
     "langgraph>=1,<2",

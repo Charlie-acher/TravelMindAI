@@ -170,6 +170,8 @@ def build_plan(requirements: TravelRequestExtraction, proposals: list[DayProposa
         title=f"{requirements.destination}{count}日行程草稿", destination=requirements.destination,
         days=[days[i] for i in range(1, count + 1)], budget=budget,
         warnings=[
+            "门票、机票与火车票：待查询；请按实际出行日期核对票价、余票和预约。",
+            "天气：待查询；未确定出行日期时不能把当前天气当作旅行期间预报。",
             "这是待确认的行程草稿。活动时间为建议，开放时间、预约和门票需出行前核实。",
             "交通方式与预留时间仅作安排建议，尚未查询实际路线，不能保证步行时长或到达时间。",
             "预算采用demo-cny-v1演示单价，含往返城际交通、住宿、餐饮、市内交通、门票及预备金；不是实时报价。",

@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>TravelMindAI · 旅行草稿设计</title><link rel="stylesheet" href="itinerary.css"></head>
+<!-- 设计依据：沿用正式对话页的青绿品牌与暖白背景。三天连续展开，预算独立于时间线；所有内容与操作均为设计示例。 -->
+<body>
+<aside class="sidebar">
+  <a class="brand" href="./"><img src="logo-mark.svg" alt=""><span>TravelMind<b>AI</b></span></a>
+  <div class="side-actions"><button class="new-chat" data-action="new"><span>＋</span>新建对话<kbd>Ctrl K</kbd></button><label class="search"><span>⌕</span><input aria-label="搜索历史对话" placeholder="搜索历史对话"></label></div>
+  <div class="history-heading">历史对话 <span>1</span></div><p class="day-label">今天</p>
+  <button class="history active" data-action="history"><span>▤</span><span>从银川出发，去长沙玩三天</span><span>···</span></button>
+  <div class="account"><span class="avatar">C</span><div><strong>charlie</strong><small>个人账号</small></div></div>
+</aside>
+<main class="workspace" data-screen-label="旅行草稿 · 整程展开">
+  <header class="topbar"><span>从银川出发，去长沙玩三天</span><span class="preview-label">设计预览</span></header>
+  <div class="scroll-area" id="scroll-area">
+    <div class="canvas">
+      <div class="assistant-intro"><img src="logo-mark.svg" alt="TravelMindAI"><p>三天的安排在这里，可以边看边调整。</p></div>
+      <article class="plan">
+        <header class="plan-header">
+          <div class="title-line"><h1 class="eyebrow">银川 <span>→</span> 长沙</h1><button class="version" id="version" data-action="changes">草稿 v2 <span>↗</span></button></div>
+          <div class="trip-facts"><span>3 天 2 晚</span><span>3 人同行</span><button data-query="这次长沙旅行的出发日期是：">日期待定 <span>＋</span></button></div>
+          <div class="change-note" id="change-note"><span class="change-dot"></span><span>已调整第 2 天的活动安排</span><button data-action="undo" id="undo-button">撤销</button></div>
+        </header>
+        <div class="plan-grid">
+          <section class="itinerary" aria-label="逐日安排">
+            <nav class="day-nav" aria-label="跳转到某天"><a href="#day-1">第 1 天</a><a href="#day-2">第 2 天</a><a href="#day-3">第 3 天</a><span>整程展开</span></nav>
+            <div id="days"></div>
+            <div class="end-note"><span></span>三天的行程，还可以慢慢打磨。<span></span></div>
+          </section>
+          <aside class="trip-aside">
+            <section class="budget" aria-labelledby="budget-title">
+              <div class="section-heading"><h2 id="budget-title">这趟旅行的预算</h2><span>演示估算</span></div>
+              <div class="amount"><small>¥</small>3,883<span>.00</span></div>
+              <p class="budget-caption">3 人全程合计 · 2 晚住宿</p>
+              <div class="budget-bar" aria-label="演示预算已分配3883元，总预算4000元"><span></span></div>
+              <div class="budget-balance"><span>总预算 ¥4,000</span><strong>余 ¥117</strong></div>
+              <details class="budget-details"><summary>费用明细与估算假设 <span>＋</span></summary><dl><div><dt>城际交通</dt><dd>¥1,500</dd></div><div><dt>住宿</dt><dd>¥1,140</dd></div><div><dt>餐饮</dt><dd>¥720</dd></div><div><dt>市内交通</dt><dd>¥180</dd></div><div><dt>门票与活动</dt><dd>¥190</dd></div><div><dt>预备金</dt><dd>¥153</dd></div></dl><p>明细为本设计稿的分配示例，使用演示单价，不代表实际报价。</p></details>
+              <p class="subtle-note">仅供预算参考，非实时门票、酒店或车票报价。</p>
+            </section>
+            <section class="before-trip" aria-labelledby="before-trip-title"><h2 id="before-trip-title">出发前，再确认一下</h2>
+              <button class="check-row" data-query="请帮我查询长沙的天气，出行日期还未确定，请先向我确认具体出行日期。"><span class="check-icon">☼</span><span><strong>天气与出行日期</strong><small>补充日期后查询天气</small></span><span class="chevron">↗</span></button>
+              <button class="check-row" data-action="tickets"><span class="check-icon">▱</span><span><strong>门票与往返交通</strong><small>票价、预约尚待核实</small></span><span class="chevron">↗</span></button>
+              <details class="travel-notes"><summary>行程说明 <span>＋</span></summary><p>这是一份待确认草稿。活动时间为建议；开放时间、预约与门票请在出行前核实。</p><p>站间交通时间为预留建议，尚未核实实际路线及耗时。</p></details>
+            </section>
+          </aside>
+        </div>
+        <footer class="plan-footer"><div><strong>让行程更合你心意</strong><p>直接告诉我想改什么，我们接着调整。</p></div><button data-query="我想把第 2 天安排得轻松一点。">第二天轻松一点 <span>↗</span></button></footer>
+      </article>
+      <p class="preview-note">交互设计示例 · 行程与费用沿用截图场景，未连接实时服务</p>
+    </div>
+  </div>
+  <div class="composer-dock"><form id="composer"><textarea id="message" aria-label="旅行需求输入" placeholder="想调整哪一段？告诉我，我们继续规划…" rows="2"></textarea><div class="composer-tools"><button type="button" aria-label="添加资料" data-action="attachment">＋</button><span><i></i>旅行规划</span><small>Enter 发送 · Shift + Enter 换行</small><button class="send" type="submit" aria-label="发送消息" disabled>↑</button></div></form><p>AI 生成内容仅供参考，请核实出行信息。</p></div>
+</main>
+<dialog id="info-dialog"><div class="dialog-top"><span>TravelMindAI · 设计预览</span><button aria-label="关闭弹窗" id="close-dialog">×</button></div><h2 id="dialog-title"></h2><div id="dialog-content"></div><button class="dialog-done" id="dialog-done">知道了</button></dialog>
+<div class="toast" role="status" id="toast"></div>
+<script src="itinerary.js"></script>
+</body></html>

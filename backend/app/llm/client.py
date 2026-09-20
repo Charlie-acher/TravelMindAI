@@ -24,7 +24,10 @@ class ModelOutputError(ModelClientError):
 class DeepSeekClient:
     """DeepSeek 客户端类：负责向模型发送消息并接收回答。"""
 
-    def __init__(self, settings: Settings, http: httpx.Client) -> None:
+    """初始化方法：普通对话沿用输出上限，附件提取可单独增加容量以免地点清单截断。"""
+
+    def __init__(self, settings: Settings, http: httpx.Client,
+                 *, max_output_tokens: int = 2048) -> None:
         if (
             settings.deepseek_api_key is None
             or not settings.deepseek_api_key.get_secret_value().strip()
@@ -42,7 +45,7 @@ class DeepSeekClient:
             use_responses_api=False,  # 使用DeepSeek兼容的Chat Completions接口。
             # 提供方专用字段放extra_body，SDK会原样传递给DeepSeek。
             # max_tokens放这里，避免ChatOpenAI自动改为另一种token参数名。
-            extra_body={"thinking": {"type": "disabled"}, "max_tokens": 2048},
+            extra_body={"thinking": {"type": "disabled"}, "max_tokens": max_output_tokens},
         )
 
     """自然回答方法：使用原生文本输出，流式草稿不受JSON或引用格式限制。"""

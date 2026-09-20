@@ -43,6 +43,10 @@ def _visible_places(turn: SavedRequirementTurn) -> list[str]:
 
 def _turn_contents(turn: SavedRequirementTurn) -> tuple[str, str]:
     user = turn.response.result.original_message
+    if not user and turn.response.attachments:
+        # 仅作为模型历史中的事件说明，不保存成用户原话或展示成消息气泡。
+        user = "[用户发送附件：" + "、".join(
+            item.file_name for item in turn.response.attachments) + "]"
     assistant = turn.response.reply
     places = _visible_places(turn)
     if places:

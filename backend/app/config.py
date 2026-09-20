@@ -46,6 +46,10 @@ class Settings(BaseSettings):
     vision_model: str = Field(default="qwen3-vl-plus", min_length=1)
     vision_timeout_seconds: float = Field(default=60, gt=0, allow_inf_nan=False)
 
+    # 本机MinerU服务；留空保留旧附件流程，正式部署配置为127.0.0.1:8010。
+    mineru_base_url: HttpUrl | None = None
+    mineru_timeout_seconds: float = Field(default=600, gt=0, le=720, allow_inf_nan=False)
+
     # 向量服务独立配置，不借用聊天模型的地址、名称或密钥。
     # 暂未开通时留空，已有Web功能仍可启动；试跑命令会检查是否配齐。
     embedding_provider: str | None = Field(default=None, min_length=1)

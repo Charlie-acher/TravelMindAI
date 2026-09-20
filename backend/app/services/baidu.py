@@ -139,7 +139,7 @@ class BaiduMaps:
         if matched == name or (isinstance(aliases, str) and name in aliases.split(";")):
             return True
         # 只去除完整末尾的景区称谓，不用包含匹配，西湖区和西湖停车场都不会命中。
-        suffix = r"(?:风景名胜区|风景区|景区)$"
+        suffix = r"(?:(?:国家(?:重点)?)?风景名胜区|风景区|景区)$"
         if not isinstance(matched, str):
             return False
         target = re.sub(suffix, "", name)

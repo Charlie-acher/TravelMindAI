@@ -9,12 +9,15 @@ from uuid import UUID, uuid4
 
 from fastapi import HTTPException
 from PIL import Image
+from pypdf import PdfReader
+from pypdf.errors import PyPdfError
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.models.attachment import ConversationAttachment
 from app.models.trip import TravelSession
 from app.schemas.attachment import AttachmentAnalysis, AttachmentView
+from app.schemas.document.base import ParsedDocument
 from app.services.document.parser import DocumentParseError, parse_document
 
 MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024
@@ -38,7 +41,7 @@ def validate_upload(file: BinaryIO, filename: str, content_type: str) -> tuple[b
         raise HTTPException(422, "附件文件名无效，不能包含目录或控制字符")
     suffix = Path(filename).suffix.lower()
     if suffix not in MIME_TYPES:
-        raise HTTPException(422, "仅支持PNG、JPEG、WebP、文字PDF、DOCX、TXT和Markdown附件")
+        raise HTTPException(422, "仅支持PNG、JPEG、WebP、PDF、DOCX、TXT和Markdown附件")
     mime = MIME_TYPES[suffix]
     accepted = {"", "application/octet-stream", mime}
     if suffix in {".md", ".markdown"}:
@@ -70,10 +73,16 @@ def validate_upload(file: BinaryIO, filename: str, content_type: str) -> tuple[b
             if (suffix in {".txt", ".md", ".markdown"}
                     and content.startswith((b"%PDF-", b"PK\x03\x04"))):
                 raise ValueError("文本格式不符")
-            parse_document(content, suffix)
+            if suffix == ".pdf":
+                # 上传只检查封装与页数；扫描PDF留给MinerU识别，不能要求已有文字层。
+                reader = PdfReader(BytesIO(content))
+                if reader.is_encrypted or not 1 <= len(reader.pages) <= 500:
+                    raise ValueError("PDF加密、为空或超过500页")
+            else:
+                parse_document(content, suffix)
     except DocumentParseError as error:
         raise HTTPException(422, str(error)) from None
-    except (OSError, ValueError, SyntaxError, Image.DecompressionBombError,
+    except (OSError, ValueError, SyntaxError, PyPdfError, Image.DecompressionBombError,
             Image.DecompressionBombWarning):
         raise HTTPException(422, "附件损坏、格式不符或图片过大，请重新导出") from None
     return content, suffix, mime
@@ -192,6 +201,27 @@ class AttachmentService:
             ).order_by(ConversationAttachment.created_at, ConversationAttachment.id))
             return [attachment_view(row) for row in rows]
 
+    """解析读取方法：按会话和引擎版本读取正文，不能跨会话借用缓存。"""
+
+    def read_parsed(self, session_id: UUID, attachment_id: UUID,
+                    parser_version: str) -> ParsedDocument | None:
+        with self._sessions() as unit:
+            require_session(unit, session_id)
+            cached = find_attachment(unit, session_id, attachment_id).parsed_json
+            if cached is None or cached.get("parser_version") != parser_version:
+                return None
+            return ParsedDocument.model_validate(cached["document"])
+
+    """解析保存方法：在调用文字模型前保存完整正文，失败重试不重复执行OCR。"""
+
+    def save_parsed(self, session_id: UUID, attachment_id: UUID,
+                    parsed: ParsedDocument, parser_version: str) -> None:
+        with self._sessions.begin() as unit:
+            require_session(unit, session_id, lock=True)
+            row = find_attachment(unit, session_id, attachment_id)
+            row.parsed_json = {"parser_version": parser_version,
+                               "document": parsed.model_dump(mode="json")}
+
     """分析保存函数：模型调用结束后一次写入结果，不在数据库事务里等待模型。"""
 
     def save_analysis(self, session_id: UUID, attachment_id: UUID,
@@ -203,7 +233,9 @@ class AttachmentService:
             if (analysis is None) == (not error_message):
                 raise ValueError("必须提供识别结果或非空错误原因，二者不能同时提供")
             # 另一个请求已完成识别时复用它，迟到的失败不能覆盖成功结果。
-            if row.analysis_json is not None:
+            if row.analysis_json is not None and (analysis is None or
+                    analysis.parser_version is None or
+                    row.analysis_json.get("parser_version") == analysis.parser_version):
                 return attachment_view(row)
             row.analysis_json = analysis.model_dump(mode="json") if analysis else None
             row.error_message = error_message[:500] if error_message else None

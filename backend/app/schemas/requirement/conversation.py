@@ -4,6 +4,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
+from app.schemas.attachment import AttachmentUse
 from app.schemas.requirement.update import RequirementUpdate
 
 TopicCity = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=80)]
@@ -39,3 +40,4 @@ class TurnUnderstanding(BaseModel):
     # 专类资料与综合攻略一起检索；无法确定类别时不限制，不能因此拒绝回答。
     retrieval_category: Literal["景点", "餐馆", "住宿"] | None = None
     conversation: ConversationState
+    attachment_use: AttachmentUse | None = None

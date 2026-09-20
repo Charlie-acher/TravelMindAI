@@ -1,6 +1,6 @@
 /** 对话HTTP契约与请求封装；只访问自己的后端，不在前端保存DeepSeek密钥。 */
 import type { AnswerResult, GeoPoint, MapLookup } from './documents'
-import type { AttachmentSnapshot } from './attachments'
+import type { AttachmentSnapshot, AttachmentUse } from './attachments'
 import { ApiError, apiFetch, readResponse } from './http'
 export interface TravelRequirement {
   intent: string
@@ -43,6 +43,7 @@ export interface ChatResponse {
   itinerary?: PlanSnapshot | null // 旧消息可没有；只展示最终提交的逐日行程。
   conversation?: ConversationState | null
   history_summary?: HistorySummary | null
+  attachment_use?: AttachmentUse | null
   attachments?: AttachmentSnapshot[] // 旧消息可没有；识别结果随本轮保存，恢复时不重跑模型。
 }
 
@@ -53,7 +54,7 @@ export interface BudgetSummary {
   subtotal: string; contingency_rate: string; contingency: string; total: string; remaining: string
   over_budget: boolean; assumptions: string[]
 }
-export interface PlanSource { id: string; kind: 'knowledge' | 'web'; title: string; text: string; url: string | null }
+export interface PlanSource { id: string; kind: 'knowledge' | 'web' | 'attachment'; attachment_id?: string | null; title: string; text: string; url: string | null }
 export interface PlanPlace { id: string; map: MapLookup; sources: PlanSource[] }
 export interface PlannedActivity {
   place: PlanPlace; start_time: string; duration_minutes: number
@@ -213,8 +214,10 @@ export async function sendRequirement(
   onUpdate: (update: RequirementUpdate) => void,
 ): Promise<SavedTurn> {
   const controller = new AbortController()
-  // 给需求抽取、检索和资料回答留出时间；超时后沿用原消息编号查是否已保存。
-  const timeout = window.setTimeout(() => controller.abort(), 180_000)
+  const startedAt = Date.now()
+  let attachmentRequest = !!pending.attachment_ids?.length
+  // PDF可分批识别；仅附件请求给15分钟，普通聊天仍保留3分钟上限。
+  let timeout = window.setTimeout(() => controller.abort(), attachmentRequest ? 900_000 : 180_000)
   try {
     const response = await apiFetch(`/api/v1/sessions/${encodeURIComponent(sessionId)}/requirement-messages/stream`, {
       method: 'POST',
@@ -224,7 +227,15 @@ export async function sendRequirement(
     })
     if (!response.ok) return await readResponse(response)
     if (!response.body || !response.headers.get('Content-Type')?.includes('text/event-stream')) throw new Error('服务没有返回可读取的回复流，请重新读取对话后重试。')
-    return await readRequirementStream(response.body, onUpdate)
+    return await readRequirementStream(response.body, update => {
+      // 复用上轮附件由服务端确认；只扩一次总期限，不随进度无限续期。
+      if (!attachmentRequest && update.event === 'progress' && update.data.stage === 'attachment') {
+        attachmentRequest = true
+        window.clearTimeout(timeout)
+        timeout = window.setTimeout(() => controller.abort(), Math.max(0, 900_000 - (Date.now() - startedAt)))
+      }
+      onUpdate(update)
+    })
   } catch (error) {
     if (controller.signal.aborted) throw new Error('等待回复超时，请重新读取确认是否已保存，或使用原消息重试。')
     throw error

@@ -59,3 +59,25 @@ def test_validate_all_owners_before_processing():
         AttachmentReader(storage, model).read(sid, [uuid4(), uuid4()])
     storage.read_content.assert_not_called()
     model.generate_json.assert_not_called()
+
+
+"""PDF客户端测试函数：PDF识别可取得视觉客户端，缺配置仍允许纯文字读取。"""
+
+@pytest.mark.parametrize("configured", [True, False])
+def test_pdf_reader_provides_vision_without_blocking_text(monkeypatch, configured):
+    from app.llm.client import ModelClientError
+
+    sid = uuid4()
+    item = uploaded(sid)
+    item.file_name, item.mime_type = "攻略.pdf", "application/pdf"
+    storage, model, factory = Mock(), Mock(), Mock()
+    storage.get.return_value = item
+    storage.read_content.return_value = (b"pdf", "application/pdf")
+    storage.save_analysis.return_value = item
+    if not configured:
+        factory.side_effect = ModelClientError("缺配置")
+    analyze = Mock(return_value=AttachmentAnalysis(summary="已读"))
+    monkeypatch.setattr("app.services.attachment.reader.analyze_content", analyze)
+    AttachmentReader(storage, model, factory).read(sid, [item.id])
+    factory.assert_called_once()
+    assert analyze.call_args.args[-1] is (factory.return_value if configured else None)

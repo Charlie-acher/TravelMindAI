@@ -138,6 +138,7 @@ def test_lookup_requires_unique_result(
 
 @pytest.mark.parametrize("city,name,subject_name,subject_address", [
     ("杭州", "西湖", "西湖风景区", "杭州市西湖区龙井路1号"),
+    ("长沙", "岳麓山", "岳麓山国家重点风景名胜区", "湖南省长沙市岳麓区登高路58号"),
     ("苏州", "同里国家湿地公园", "江苏同里国家湿地公园", "江苏省苏州市吴江区同里镇肖甸湖村"),
 ])
 def test_lookup_prefers_place_subject_over_same_named_bus_stop(
@@ -154,6 +155,14 @@ def test_lookup_prefers_place_subject_over_same_named_bus_stop(
     assert result.poi_id == "subject"
     assert result.matched_name == subject_name
     assert result.address == subject_address
+
+
+"""国家景区后缀测试函数：只认完整主体，不能将入口、停车场或周边设施并成景区。"""
+
+@pytest.mark.parametrize("name", ["岳麓山国家重点风景名胜区-东门",
+                                  "岳麓山国家重点风景名胜区停车场", "岳麓山旅游码头"])
+def test_national_scenic_subject_does_not_match_facilities(name):
+    assert not BaiduMaps._same_name({"name": name}, "岳麓山", "长沙")
 
 
 """严格后缀测试函数：景区附属站点不能因名称包含主体而冒充景区。"""

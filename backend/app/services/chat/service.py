@@ -15,13 +15,15 @@ from pydantic import ValidationError
 from app.llm.budget import ModelInputLimitError
 from app.llm.client import ModelClientError, ModelOutputError
 from app.llm.embeddings import EmbeddingError
+from app.schemas.attachment import AttachmentUse
 from app.schemas.dining import DiningResult
 from app.schemas.map_tools import MapToolAnswer
 from app.schemas.requirement.base import TravelRequestExtraction
 from app.schemas.requirement.chat import RequirementChatResponse, RequirementMessage
 from app.schemas.requirement.history import SavedRequirementMessage, SavedRequirementTurn
-from app.services.attachment.reader import AttachmentReader, attachment_reply
+from app.services.attachment.reader import AttachmentReader
 from app.services.baidu import BaiduMaps
+from app.services.chat.attachments import plan_attachment_candidates, respond_to_attachments
 from app.services.chat.context import (
     build_history_messages,
     build_recall_messages,
@@ -121,7 +123,9 @@ def process_saved_message(
         if turn.message_id == payload.message_id:
             if (
                 turn.response.result.original_message != payload.message
-                or [item.id for item in turn.response.attachments] != payload.attachment_ids
+                or (turn.response.attachment_request_ids if turn.response.attachment_request_ids
+                    is not None else [item.id for item in turn.response.attachments])
+                != payload.attachment_ids
                 or turn.revision != payload.expected_revision + 1
                 or (turn.response.itinerary is not None
                     and turn.response.itinerary.operation == "undo")
@@ -135,25 +139,14 @@ def process_saved_message(
     reference_date = (history.turns[0].response.result.reference_date if history.turns else
                       datetime.now(timezone(timedelta(hours=8))).date())
     conversation = latest_conversation(history.turns)
+    snapshots = []
     if payload.attachment_ids:
         if attachments is None:
             raise HTTPException(503, "附件服务尚未准备好，请稍后重试")
         snapshots = attachments.read(session_id, payload.attachment_ids)
-        extraction = previous or TravelRequestExtraction(
-            intent="other", destination=None, origin=None, start_date=None, end_date=None,
-            days=None, travelers=None, total_budget=None, pace=None, interests=[], dietary=[],
-            lodging_preferences=[], hard_constraints=[], excluded_items=[], assumptions=[],
-        )
-        result = build_result(payload.message, reference_date, extraction).model_copy(
-            update={"message_intent": "travel_info"},
-        )
-        response = RequirementChatResponse(
-            result=result, reply=attachment_reply(snapshots), status="knowledge",
-            changed_fields=[], request_id=request_id, conversation=conversation,
-            attachments=snapshots,
-        )
-        progress("save", "正在保存附件识别结果与本轮消息")
-        return service.append(session_id, payload.message_id, payload.expected_revision, response)
+    elif history.turns:
+        # 仅向理解层提供紧接上一轮的附件；是否沿用仍由本轮用户表达决定。
+        snapshots = history.turns[-1].response.attachments
     old_summary = latest_summary(history.turns)
     recent = select_recent_turns(history.turns)
     candidate_summary = None
@@ -178,7 +171,11 @@ def process_saved_message(
     try:
         result, understanding = understand_turn(
             payload.message, model, reference_date=reference_date, previous=previous,
-            conversation=conversation, history_messages=shared_messages,
+            conversation=conversation, history_messages=shared_messages, attachments=snapshots,
+            attachments_selected=bool(payload.attachment_ids),
+            continue_attachment_plan=bool(previous and old_plan is None
+                and previous.intent in {"plan_trip", "modify_trip"}
+                and history.turns[-1].response.status == "needs_clarification"),
         )
     except (RequirementExtractionError, ModelOutputError, ModelInputLimitError):
         progress("fallback", "正在直接结合本轮原话和最近对话查找旅行资料")
@@ -192,6 +189,22 @@ def process_saved_message(
             status="knowledge", changed_fields=[], request_id=request_id,
             conversation=conversation, history_summary=candidate_summary,
         )
+        if payload.attachment_ids:
+            response.attachment_request_ids = payload.attachment_ids
+            response, _ = respond_to_attachments(response, snapshots, AttachmentUse(), previous,
+                old_plan, model, search_context, maps, shared_messages)
+            return service.append(session_id, payload.message_id,
+                                  payload.expected_revision, response)
+        if (snapshots and history.turns[-1].response.status == "needs_clarification"
+                and history.turns[-1].response.attachment_use is not None):
+            # 补问理解失败也保留附件接续，不能由普通回答覆盖待处理附件。
+            response.attachments = snapshots
+            response.attachment_request_ids = []
+            response.attachment_use = history.turns[-1].response.attachment_use
+            response.status = "needs_clarification"
+            response.reply = "这次补充的信息还未能准确理解，附件和已有条件已保留。请再说明一次。"
+            return service.append(session_id, payload.message_id,
+                                  payload.expected_revision, response)
         # 结构化理解不是检索开关。失败时不改旅行状态，仍以真实用户原话取得参考资料。
         query = "\n".join([
             *(turn.response.result.original_message[-200:] for turn in recent[-2:]),
@@ -225,6 +238,22 @@ def process_saved_message(
                if planning else "knowledge", changed_fields=changed,
         conversation=understanding.conversation, history_summary=candidate_summary,
     )
+    if payload.attachment_ids or understanding.attachment_use is not None:
+        # 接续使用本会话上一轮不可变快照，提交事务仍会逐一复核原件归属。
+        progress("attachment", "正在处理附件用途与行程")
+        response.attachment_request_ids = payload.attachment_ids
+        response, attached_plan = respond_to_attachments(
+            response, snapshots, understanding.attachment_use or AttachmentUse(), previous,
+            old_plan, model, search_context, maps, shared_messages,
+        )
+        progress("save", "正在保存附件用途与本轮结果")
+        if attached_plan is not None:
+            return service.append(session_id, payload.message_id, payload.expected_revision,
+                response, plan=attached_plan, expected_itinerary_version=itinerary_version)
+        return service.append(session_id, payload.message_id, payload.expected_revision, response)
+    if understanding.response_mode == "plan" and result.clarification:
+        # 已明确要草稿但条件未齐时集中补问，不用自由回答盖掉缺项问题。
+        return service.append(session_id, payload.message_id, payload.expected_revision, response)
     query_context = json.dumps({"query_cities": understanding.query_cities,
                                "retrieval_query": understanding.retrieval_query},
                               ensure_ascii=False)
@@ -261,33 +290,37 @@ def process_saved_message(
                 response = natural_chat_response(response, model, query_context,
                                                  history_messages=shared_messages)
     elif understanding.response_mode == "plan" and response.status == "complete":
+        # 修改草稿时保留它已采用攻略的完整候选，不能只看到已经排入行程的几个点。
+        plan_attachments = plan_attachment_candidates(
+            history.turns, old_plan, result.extraction.destination)
         try:
             with search_context as search:
                 try:
                     planned = plan_trip(payload.message, result.extraction, old_plan,
                                         model.model, search, maps, web,
-                                        history_messages=shared_messages)
+                                        history_messages=shared_messages,
+                                        attachments=plan_attachments,
+                                        attachment_use=AttachmentUse(mode="reference",
+                                            apply_to_plan=True) if plan_attachments else None)
                 except (ModelOutputError, ValidationError):
-                    progress("planning", "行程暂未完成核对，将先结合旅行资料给出建议")
-                    response = ground_chat_response(
-                        response, search, model, web=web, reference_only=True,
-                        retrieval_query=understanding.retrieval_query or payload.message,
-                        query_cities=understanding.query_cities,
-                        history_context=query_context + "行程未完成核对，不声称已生成或修改。",
-                        history_messages=shared_messages,
-                    )
+                    response = response.model_copy(update={
+                        "status": "needs_clarification",
+                        "reply": "这次行程安排还未完成核对，请重试。已有条件和草稿已保留。",
+                    })
                     planned = None
         except (EmbeddingError, MilvusError, ModelInputLimitError):
-            response = natural_chat_response(response, model, query_context,
-                                             history_messages=shared_messages)
+            response = response.model_copy(update={"status": "needs_clarification",
+                "reply": "知识库暂时未能完成检索，本次尚未生成行程草稿。请稍后重试，"
+                         "已有条件和草稿已保留。"})
         except HTTPException as error:
             if error.status_code not in {502, 503}:
                 raise
-            response = natural_chat_response(response, model, query_context,
-                                             history_messages=shared_messages)
+            response = response.model_copy(update={"status": "needs_clarification",
+                "reply": "行程所需的资料或地图服务暂不可用，请稍后重试。已有草稿已保留。"})
         else:
             if planned is not None:
-                response = response.model_copy(update={"reply": planned.reply})
+                response = response.model_copy(update={"reply": planned.reply,
+                    "status": "complete" if planned.plan is not None else "needs_clarification"})
                 progress("save", "正在保存本轮结果和行程版本")
                 return service.append(session_id, payload.message_id, payload.expected_revision,
                                       response, plan=planned.plan,

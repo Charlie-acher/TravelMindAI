@@ -107,3 +107,8 @@
 /* 用户发出的附件独立放在消息气泡上方，并与气泡右边缘对齐。 */
 .user .user-attachments { display: flex; flex-direction: column; align-items: flex-end; margin: 0 0 8px; }
 .user .user-attachments :deep(.attachment-card) { margin: 0 0 6px; max-width: 100%; }
+
+/* 有行程的对话留出双栏宽度，普通文字仍保持原有阅读宽度。 */
+.messages:has(.itinerary-card) { padding-inline: max(24px,calc((100% - 1000px)/2)); }
+.messages:has(.itinerary-card) .message-row:not(:has(.itinerary-card)) { max-width: 800px; margin-left: auto; margin-right: auto; }
+@media(max-width:700px) { .messages:has(.itinerary-card) { padding-inline: 12px; } }

@@ -122,7 +122,7 @@ export async function generateDocumentChunks(id: string): Promise<DocumentChunkP
   return readResponse(await apiFetch(`/api/v1/admin/documents/${encodeURIComponent(id)}/chunks`, { method: 'POST' }))
 }
 
-/** 命中类型：正文和位置来自数据库，相似度不代表内容正确率。 */
+/** 命中类型：正文和位置来自数据库，score为混合排序分，不代表内容正确率。 */
 export interface SearchHit { score: number; file_name: string; chunk: DocumentChunk }
 
 /** 地图坐标类型：新查询使用百度坐标，旧历史保留GCJ-02，页面不能猜测或混用。 */

@@ -34,3 +34,11 @@ export async function uploadAttachment(sessionId: string, file: File): Promise<A
 export async function listAttachments(sessionId: string): Promise<AttachmentView[]> {
   return readResponse(await apiFetch(`/api/v1/sessions/${encodeURIComponent(sessionId)}/attachments`, { cache: 'no-store' }))
 }
+
+/** 用途随消息保存，同一文件可以在后续消息中改为另一种用途。 */
+export interface AttachmentUse {
+  mode: 'read' | 'reference' | 'required' | 'replace' | 'unclear'
+  apply_to_plan: boolean
+  target_days: number[]
+  target_places?: string[]
+}

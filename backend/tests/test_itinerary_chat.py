@@ -65,7 +65,7 @@ def test_planning_food_preference_modify_undo_and_retry(store_engine):
             expected_revision=2), model, history, "no-reuse", nullcontext(search), maps)
 
 
-"""输出恢复测试函数：规划输出无效时保存资料建议，不能保存半成品行程。"""
+"""输出恢复测试函数：规划输出无效时说明失败，不用自由回答冒充草稿。"""
 
 
 def test_agent_output_failure_saves_reference_reply_without_plan(store_engine):
@@ -89,7 +89,9 @@ def test_agent_output_failure_saves_reference_reply_without_plan(store_engine):
     saved = process_saved_message(trip.id, SavedRequirementMessage(
         message="杭州两天，两人，5000元", message_id=uuid4(), expected_revision=0),
         client, history, "failed-agent", nullcontext(search), Mock(tools=MCPTools()))
-    assert search.search.call_count == 2
-    assert saved.response.reply == client.generate_text.return_value
+    assert search.search.call_count == 1
+    assert saved.response.status == "needs_clarification"
+    assert "重试" in saved.response.reply
+    client.generate_text.assert_not_called()
     assert history.read(trip.id).revision == 1
     assert history.read_plan(trip.id) == (0, None)

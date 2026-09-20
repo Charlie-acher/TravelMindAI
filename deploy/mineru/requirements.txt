@@ -1,0 +1,2 @@
+# MinerU独立推理环境，不安装进FastAPI后端虚拟环境。
+mineru==4.0.4

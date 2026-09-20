@@ -15,10 +15,15 @@ class PlanSource(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
     id: str
-    kind: Literal["knowledge", "web"]
+    kind: Literal["knowledge", "web", "attachment"]
     title: str
     text: str
     url: HttpUrl | None = None
+    attachment_id: UUID | None = None  # 私人附件来源只随当前会话的行程保存。
+    document_id: UUID | None = None  # 共享原文编号；旧快照没有此字段时保持为空。
+    chunk_id: UUID | None = None  # 实际读取的片段编号，便于定位引用。
+    page_number: int | None = Field(default=None, ge=1)  # 有可靠物理页码时才保存。
+    section_path: list[str] = Field(default_factory=list)  # 原文标题路径。
 
 
 class PlanPlace(BaseModel):

@@ -4,10 +4,11 @@
 
 from datetime import date
 from typing import Literal
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.schemas.attachment import AttachmentSnapshot
+from app.schemas.attachment import AttachmentSnapshot, AttachmentUse
 from app.schemas.dining import DiningResult
 from app.schemas.document.answer import AnswerResult
 from app.schemas.itinerary import PlanSnapshot
@@ -41,3 +42,6 @@ class RequirementChatResponse(BaseModel):
     conversation: ConversationState | None = None  # None是旧版缺字段，空话题是明确清除。
     history_summary: HistorySummary | None = None  # 仅摘要更新轮写入，覆盖范围随整轮事务提交。
     attachments: list[AttachmentSnapshot] = Field(default_factory=list, max_length=3)
+    attachment_use: AttachmentUse | None = None
+    # 补问可沿用上轮附件；独立保留浏览器实际提交的编号，避免重试误判冲突。
+    attachment_request_ids: list[UUID] | None = Field(default=None, max_length=3)

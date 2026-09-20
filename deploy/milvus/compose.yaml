@@ -1,14 +1,36 @@
 # 部署层：在Docker Desktop中启动本地单机Milvus，供后端保存和搜索向量。
-# 参考官方standalone_embed.sh的内嵌etcd与本地存储配置，版本固定便于复现。
+# etcd先通过健康检查再启动Milvus，避免内嵌etcd尚未选主时读取会话编号而崩溃。
 services:
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.23 # 与原Milvus内嵌etcd版本一致。
+    container_name: travelmind-milvus-etcd
+    command:
+      - /usr/local/bin/etcd
+      - --name=default
+      - --data-dir=/var/lib/milvus/etcd
+      - --listen-client-urls=http://0.0.0.0:2379
+      - --advertise-client-urls=http://etcd:2379
+      - --listen-peer-urls=http://localhost:2380
+      - --initial-advertise-peer-urls=http://localhost:2380
+      - --initial-cluster=default=http://localhost:2380
+      - --quota-backend-bytes=4294967296
+      - --auto-compaction-mode=revision
+      - --auto-compaction-retention=1000
+    volumes:
+      - milvus-data:/var/lib/milvus # 直接读取原etcd目录，不迁移或重建数据。
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/etcdctl", "--endpoints=http://127.0.0.1:2379", "endpoint", "health"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
   milvus:
     image: milvusdb/milvus:v2.6.17
     container_name: travelmind-milvus
     command: ["milvus", "run", "standalone"]
     environment:
-      ETCD_USE_EMBED: "true"
-      ETCD_DATA_DIR: /var/lib/milvus/etcd
-      ETCD_CONFIG_PATH: /milvus/configs/embedEtcd.yaml
+      ETCD_USE_EMBED: "false"
+      ETCD_ENDPOINTS: etcd:2379
       COMMON_STORAGETYPE: local
       DEPLOY_MODE: STANDALONE
     ports:
@@ -16,7 +38,9 @@ services:
       - "127.0.0.1:9091:9091" # 本机健康检查。
     volumes:
       - milvus-data:/var/lib/milvus # Docker命名卷保留向量和元数据，重启容器不丢失。
-      - ./embedEtcd.yaml:/milvus/configs/embedEtcd.yaml:ro
+    depends_on:
+      etcd:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
       interval: 10s
