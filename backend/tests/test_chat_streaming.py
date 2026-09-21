@@ -162,7 +162,7 @@ def test_sse_save_retry_and_conflict(store_engine, monkeypatch) -> None:
     app = create_app(Settings(database_url=None))
     app.dependency_overrides[routes.get_history_service] = lambda: service
     model = FakeModel([answer(destination="杭州")])
-    monkeypatch.setattr(routes, "DeepSeekClient", lambda *args: model)
+    monkeypatch.setattr(routes, "GatewayClient", lambda *args, **kwargs: model)
     search = Mock()
     search.search.return_value = SearchResult(items=[])
 
@@ -238,13 +238,14 @@ def test_stream_disconnect_keeps_worker_alive(monkeypatch) -> None:
         finished.set()
         return SimpleNamespace(model_dump=lambda **kwargs: {"revision": 1})
 
-    monkeypatch.setattr(routes, "DeepSeekClient", Mock())
-    monkeypatch.setattr(routes, "process_saved_message", work)
+    monkeypatch.setattr(routes, "GatewayClient", Mock())
+    monkeypatch.setattr(routes, "run_saved_workflow", work)
 
     async def scenario():
         request = SimpleNamespace(state=SimpleNamespace(request_id="test"),
                                   app=SimpleNamespace(state=SimpleNamespace(
-                                      settings=Settings(), chat_workers=set(),
+                                      settings=Settings(), chat_workers=set(), model_gateway=Mock(),
+                                      chat_cancellations={},
                                   )))
         response = await routes.stream_saved_message(
             uuid4(), SavedRequirementMessage(
@@ -293,6 +294,52 @@ def test_shutdown_waits_for_disconnected_worker() -> None:
     asyncio.run(scenario())
 
 
+"""停止测试函数：收到指令后仍显示运行中，直到线程退出才允许安全重试。"""
+
+def test_stop_waits_for_worker_and_never_sends_done(monkeypatch) -> None:
+    import asyncio
+    from threading import Event
+    from types import SimpleNamespace
+    from uuid import uuid4
+
+    from app.api.requirement import history as routes
+    from app.schemas.requirement.history import SavedRequirementMessage
+    from app.services.chat.events import check_cancelled, progress
+
+    release = Event()
+
+    def work(*args, **kwargs):
+        progress("test", "已经开始")
+        assert release.wait(3)
+        check_cancelled()
+        raise AssertionError("停止后不能保存")
+
+    monkeypatch.setattr(routes, "GatewayClient", Mock())
+    monkeypatch.setattr(routes, "run_saved_workflow", work)
+
+    async def scenario():
+        request = SimpleNamespace(state=SimpleNamespace(request_id="test"),
+            app=SimpleNamespace(state=SimpleNamespace(settings=Settings(),
+                chat_workers=set(), model_gateway=Mock(), chat_cancellations={})))
+        session_id, message_id = uuid4(), uuid4()
+        response = await routes.stream_saved_message(session_id, SavedRequirementMessage(
+            message="杭州", message_id=message_id, expected_revision=0), request, Mock())
+        iterator = response.body_iterator
+        assert "received" in await anext(iterator)
+        assert "已经开始" in await anext(iterator)
+        assert await routes.stop_message(session_id, message_id, request) == {"running": True}
+        assert await routes.message_execution(session_id, message_id, request) == {"running": True}
+        release.set()
+        frame = await anext(iterator)
+        assert '"status": 499' in frame and "event: done" not in frame
+        await asyncio.gather(*list(request.app.state.chat_workers))
+        await asyncio.sleep(0)
+        assert await routes.message_execution(session_id, message_id, request) == {"running": False}
+        await iterator.aclose()
+
+    asyncio.run(scenario())
+
+
 """错误脱敏测试函数：流开始后的失败用error结束，不泄露底层异常也不假装保存。"""
 
 @pytest.mark.parametrize("error,status", [
@@ -308,7 +355,7 @@ def test_stream_error_is_sanitized_and_never_done(monkeypatch, error, status) ->
     app = create_app(Settings(database_url=None))
     service = Mock()
     app.dependency_overrides[routes.get_history_service] = lambda: service
-    monkeypatch.setattr(routes, "DeepSeekClient", Mock(side_effect=error))
+    monkeypatch.setattr(routes, "GatewayClient", Mock(side_effect=error))
     with authenticated_client(app) as client:
         result = client.post(f"/api/v1/sessions/{uuid4()}/requirement-messages/stream", json={
             "message": "想去杭州", "message_id": str(uuid4()), "expected_revision": 0,

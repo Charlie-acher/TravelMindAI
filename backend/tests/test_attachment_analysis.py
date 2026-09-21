@@ -21,6 +21,33 @@ def output(**changes):
     ], "warnings": [], **changes}, ensure_ascii=False)
 
 
+"""多源顺序测试函数：文字和视觉一致时保留顺序，冲突、缺项或无顺序时不猜测。"""
+
+@pytest.mark.parametrize("variant,expected", [
+    ("same", [1, 2]), ("reverse", [None, None]),
+    ("partial", [None, None]), ("unknown", [None, None]),
+])
+def test_merged_route_keeps_only_agreed_complete_order(variant, expected):
+    from app.schemas.attachment import AttachmentAnalysis
+    from app.services.attachment.analysis import merge_analyses
+
+    text = AttachmentAnalysis.model_validate_json(output())
+    visual = text.model_copy(deep=True)
+    if variant == "reverse":
+        visual.waypoints.reverse()
+        for index, point in enumerate(visual.waypoints, 1):
+            point.order = index
+    elif variant == "partial":
+        visual.waypoints.pop()
+    elif variant == "unknown":
+        for point in visual.waypoints:
+            point.order = None
+    result = merge_analyses([text, visual])
+    assert [point.name for point in result.waypoints] == ["断桥", "白堤"]
+    assert [point.order for point in result.waypoints] == expected
+    assert [point.order for point in text.waypoints] == [1, 2]
+
+
 """正文识别测试函数：复用文字解析，识别不能被提升为地图核实。"""
 
 def test_text_evidence_and_unverified_places():

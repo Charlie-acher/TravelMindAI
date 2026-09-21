@@ -121,6 +121,39 @@ def test_agent_selects_tools_then_validates_real_tool_results():
     assert len(model.calls) == 3
 
 
+@pytest.mark.parametrize("agent_kind", ["plan", "nearby"])
+def test_planner_does_not_checkpoint_mutable_tool_closures_inside_outer_graph(agent_kind):
+    from typing import TypedDict
+
+    from langgraph.checkpoint.memory import InMemorySaver
+    from langgraph.graph import END, START, StateGraph
+
+    class State(TypedDict):
+        done: bool
+
+    old = build_plan(requirements(), [proposal(1, "p1"), proposal(2, "p2")], places(), None, None)
+    model = RecordingModel(['{"days":[]}'])
+
+    def generate(state):
+        if agent_kind == "nearby":
+            from app.services.chat.dining import handle_nearby
+            from tests.test_nearby import native
+            result = handle_nearby("继续规划", None, [], Mock(), native(("continue_chat", {})))
+            return {"done": result is None}
+        result = plan_trip("第一天不变", requirements(), old, model.model, Mock(), Mock(), None)
+        return {"done": result.plan is not None}
+
+    saver = InMemorySaver()
+    graph = StateGraph(State)
+    graph.add_node("generate", generate)
+    graph.add_edge(START, "generate")
+    graph.add_edge("generate", END)
+    config = {"configurable": {"thread_id": "outer-test"}}
+    assert graph.compile(checkpointer=saver).invoke(
+        {"done": False}, config, durability="sync")["done"]
+    assert all(item.config["configurable"]["checkpoint_ns"] == "" for item in saver.list(None))
+
+
 def test_tool_budget_is_bounded_and_foreign_names_never_queried():
     search, maps = Mock(), Mock()
     raw = json.dumps({"tools": [{"tool": "map_lookup", "name": "编造景点",

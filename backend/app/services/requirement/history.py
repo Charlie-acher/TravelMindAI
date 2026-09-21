@@ -119,6 +119,7 @@ class RequirementHistoryService:
     """复用应用生命周期管理的连接池，不在构造时执行查询。"""
 
     def __init__(self, engine: Engine) -> None:
+        self.engine = engine
         self._sessions = sessionmaker(bind=engine, expire_on_commit=False)
 
     """一次查询获取有序轮次，再从同一份结果计算版本，避免版本与内容不一致。"""
@@ -181,6 +182,8 @@ class RequirementHistoryService:
                     or [item.id for item in saved.response.attachments]
                     != [item.id for item in response.attachments]
                     or saved.response.attachment_request_ids != response.attachment_request_ids
+                    or saved.response.workflow_request != response.workflow_request
+                    or saved.response.selected_provider != response.selected_provider
                 ):
                     raise HistoryConflictError("消息编号已用于其他提交，请重新读取会话")
                 return saved

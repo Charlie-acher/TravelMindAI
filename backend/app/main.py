@@ -29,6 +29,7 @@ from app.api.requirement.routes import router as requirements_router
 from app.api.trips import router as sessions_router
 from app.config import Settings, load_settings
 from app.database import create_database_engine
+from app.llm.gateway import GatewayState
 from app.schemas.common import ErrorResponse
 from app.services.document.jobs import DocumentJobService
 from app.services.knowledge_scope import KNOWLEDGE_SCOPE
@@ -91,7 +92,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     # 配置只保存在后端进程；对话路由通过依赖取得配置，浏览器不会收到密钥。
     app.state.settings = settings
+    app.state.model_gateway = GatewayState(settings.model_gateway)
     app.state.chat_workers = set()
+    app.state.chat_cancellations = {}
     app.state.login_limiter = LoginLimiter()
     # 中间件后注册的先执行：先生成请求编号，再检查上传大小，报错时也能查到编号。
     app.add_middleware(DocumentUploadLimitMiddleware)

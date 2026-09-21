@@ -3,10 +3,43 @@
 """
 
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import AliasChoices, Field, HttpUrl, SecretStr
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, HttpUrl, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from app.llm.contracts import Capability, ProviderName
+
+"""默认路由函数：每次配置创建独立字典，现有业务只授权DeepSeek。"""
+
+def default_model_routes() -> dict[Capability, dict[ProviderName, float]]:
+    return {"extract": {"deepseek": 1.0}, "research": {"deepseek": 1.0},
+            "plan": {"deepseek": 1.0}, "review": {"deepseek": 1.0}, "chat": {"deepseek": 1.0}}
+
+
+class GatewaySettings(BaseModel):
+    """网关配置类：限定各能力候选、并发数量与短期熔断参数。"""
+
+    routes: dict[Capability, dict[ProviderName, Annotated[float, Field(
+        gt=0, le=1000, allow_inf_nan=False,
+    )]]] = Field(default_factory=default_model_routes)
+    max_concurrent: int = Field(default=4, ge=1, le=100)
+    window_size: int = Field(default=10, ge=1, le=1000)
+    failure_threshold: int = Field(default=3, ge=1, le=100)
+    cooldown_seconds: float = Field(default=30, gt=0, allow_inf_nan=False)
+    retry_delay_seconds: float = Field(default=0.25, ge=0, le=5, allow_inf_nan=False)
+    max_retry_after_seconds: float = Field(default=5, ge=0, le=30, allow_inf_nan=False)
+    model_config = ConfigDict(extra="forbid")
+
+
+class ProviderSettings(BaseModel):
+    """文本提供方配置类：保存独立的地址、型号、密钥和请求时限。"""
+
+    api_key: SecretStr | None = None
+    base_url: HttpUrl | None = None
+    model: str | None = Field(default=None, min_length=1)
+    timeout_seconds: float = Field(default=30, gt=0, allow_inf_nan=False)
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid", hide_input_in_errors=True)
 
 
 class Settings(BaseSettings):
@@ -39,6 +72,14 @@ class Settings(BaseSettings):
     deepseek_model: str = Field(default="deepseek-v4-pro", min_length=1)
     # HTTP连接、读、写和连接池等待均使用此超时秒数，不能为0或无穷大。
     deepseek_timeout_seconds: float = Field(default=30, gt=0, allow_inf_nan=False)
+    deepseek_base_url: HttpUrl = HttpUrl("https://api.deepseek.com")
+
+    # 新增文本提供方必须单独配置，不从视觉或向量设置中借用密钥。
+    # 双下划线可逐项填写，如TRAVELMIND_MODEL_PROVIDERS__QWEN__API_KEY。
+    model_providers: dict[Literal["qwen", "kimi"], ProviderSettings] = Field(
+        default_factory=dict,
+    )
+    model_gateway: GatewaySettings = Field(default_factory=GatewaySettings)
 
     # 私人图片只发送到显式配置的百炼视觉入口，不自动复用文本或向量密钥。
     vision_api_key: SecretStr | None = None
@@ -76,6 +117,7 @@ class Settings(BaseSettings):
     # 环境变量和配置文件的读取规则。
     model_config = SettingsConfigDict(
         env_prefix="TRAVELMIND_",  # app_name 对应 TRAVELMIND_APP_NAME。
+        env_nested_delimiter="__",  # 文本提供方可以通过独立变量逐项配置。
         env_file_encoding="utf-8",  # 保证 .env 中的中文名称能够正确读取。
         extra="ignore",  # 已有 .env 中其他实验的变量不属于本阶段，忽略即可。
         str_strip_whitespace=True,  # 先去掉两端空格，使纯空格名称也无法通过校验。

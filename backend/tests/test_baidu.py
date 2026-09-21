@@ -117,6 +117,21 @@ def test_lookup_requires_exact_name_and_region(
         assert result.address is None
 
 
+"""同名优先测试函数：原名精确命中优先于别名，多个同名主体仍须补问。"""
+
+@pytest.mark.parametrize("duplicate,expected", [(False, "found"), (True, "ambiguous")])
+def test_lookup_exact_name_before_alias(monkeypatch: pytest.MonkeyPatch,
+                                       duplicate: bool, expected: str) -> None:
+    exact = restaurant("4.8", uid="exact", name="花港观鱼",
+                       detail_info={"tag": "旅游景点"})
+    alias = restaurant("4.8", uid="alias", name="花港观鱼" if duplicate else "花港公园",
+                       detail_info={"tag": "旅游景点;公园", "new_alias": "花港观鱼"})
+    with map_service(monkeypatch, {"results": [alias, exact]}) as maps:
+        result = maps.lookup("杭州", "花港观鱼")
+    assert result.status == expected
+    assert result.poi_id == ("exact" if not duplicate else None)
+
+
 """唯一性测试函数：同名地点有歧义或结果为空时，不借用任何候选坐标。"""
 
 

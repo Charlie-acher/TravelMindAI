@@ -1,0 +1,8 @@
+[
+  {"id":"walking-round-up","transport":"walk","coordinate_system":"BD-09","routes":[{"duration":1801,"distance":2300}],"expected_status":"estimated","expected_minutes":31,"expected_model":"walking"},
+  {"id":"transit-seconds","transport":"transit","coordinate_system":"BD-09","routes":[{"duration":2400,"distance":8200}],"expected_status":"estimated","expected_minutes":40,"expected_model":"transit"},
+  {"id":"taxi-seconds","transport":"taxi","coordinate_system":"BD-09","routes":[{"duration":901,"distance":7000}],"expected_status":"estimated","expected_minutes":16,"expected_model":"driving"},
+  {"id":"no-route","transport":"walk","coordinate_system":"BD-09","routes":[],"expected_status":"unavailable","expected_minutes":null,"expected_model":"walking"},
+  {"id":"missing-duration","transport":"walk","coordinate_system":"BD-09","routes":[{"distance":2300}],"expected_status":"unavailable","expected_minutes":null,"expected_model":"walking"},
+  {"id":"wrong-coordinate","transport":"walk","coordinate_system":"GCJ-02","routes":[{"duration":1800,"distance":2300}],"expected_status":"unavailable","expected_minutes":null,"expected_model":null}
+]

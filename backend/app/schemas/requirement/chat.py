@@ -3,11 +3,12 @@
 """
 
 from datetime import date
-from typing import Literal
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.llm.contracts import SelectableProvider
 from app.schemas.attachment import AttachmentSnapshot, AttachmentUse
 from app.schemas.dining import DiningResult
 from app.schemas.document.answer import AnswerResult
@@ -15,6 +16,7 @@ from app.schemas.itinerary import PlanSnapshot
 from app.schemas.map_tools import MapToolAnswer
 from app.schemas.requirement.base import RequirementResult, TravelRequestExtraction
 from app.schemas.requirement.conversation import ConversationState, HistorySummary
+from app.schemas.workflow import WorkflowResume, WorkflowSnapshot
 
 
 class RequirementMessage(BaseModel):
@@ -25,6 +27,7 @@ class RequirementMessage(BaseModel):
     previous: TravelRequestExtraction | None = None
     # 固定本次对话的参考日期，避免跨天后改变“明天”等说法的含义。
     reference_date: date | None = None
+    selected_provider: SelectableProvider = "deepseek"
 
 
 class RequirementChatResponse(BaseModel):
@@ -45,3 +48,8 @@ class RequirementChatResponse(BaseModel):
     attachment_use: AttachmentUse | None = None
     # 补问可沿用上轮附件；独立保留浏览器实际提交的编号，避免重试误判冲突。
     attachment_request_ids: list[UUID] | None = Field(default=None, max_length=3)
+    workflow: WorkflowSnapshot | None = None
+    workflow_request: WorkflowResume | None = None  # 保存原选择，重试不得换成另一动作。
+    selected_provider: SelectableProvider = "deepseek"  # 老历史按原固定模型兼容读取。
+    used_providers: list[SelectableProvider] = Field(default_factory=list)
+    agent_tasks: list[dict[str, Any]] = Field(default_factory=list)  # 程序生成的研究委派摘要。

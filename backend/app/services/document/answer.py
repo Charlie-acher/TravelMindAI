@@ -11,6 +11,7 @@ from pydantic import ValidationError
 
 from app.llm.budget import budget_messages
 from app.llm.client import ModelClientError
+from app.llm.contracts import capability_scope
 from app.schemas.document.answer import (
     AnswerPoint,
     AnswerResult,
@@ -244,7 +245,7 @@ def answer_from_sources(
                 "只选资料支持的两三种代表性旅行体验，不罗列景区数量、政策、排名、年卡或统计数据。"
                 "用轻松口语，不复述官方新闻稿；attractions=[]、map_queries=[]，不额外追问。"
             )
-        with public_answer(set(texts)):
+        with public_answer(set(texts)), capability_scope("research"):
             raw = model.generate_json(budget_messages(
                 [{"role": "system", "content": instructions}],
                 {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},

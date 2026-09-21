@@ -3,7 +3,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { Alert as AAlert, Button as AButton, Modal } from '@arco-design/web-vue'
 import { currentAccount, login, logout, register, type Account } from './api/auth'
-import { getModelStatus, listSessions, renameSession, type SessionSummary } from './api/requirements'
+import { modelNames, type ModelOption, getModelStatus, listSessions, renameSession, type SessionSummary } from './api/requirements'
 import { advanceAuthGeneration, ApiError } from './api/http'
 import { useRequirementConversation } from './useRequirementConversation'
 import DocumentPanel from './components/DocumentPanel.vue'
@@ -40,14 +40,15 @@ const deletingId = ref<string | null>(null)
 let deleteDialog: ReturnType<typeof Modal.confirm> | null = null
 let authGeneration = 0
 let listGeneration = 0
-const { messages, input, sessionId, busy, restoring, restoreFailed, error, storageWarning, progress,
+const { messages, input, selectedProvider, sessionId, busy, stopping, canStop, stop, restoring, restoreFailed, error, storageWarning, progress,
   chatArea, initialize, reloadConversation, send: sendConversation,
   selectConversation, clearConversation, deleteConversation, undoDraft, undoTarget, pendingUndo,
-  selectedAttachments, uploading, addAttachments, removeAttachment } = useRequirementConversation()
+  selectedAttachments, uploading, addAttachments, removeAttachment, workflowTarget, chooseWorkflow, pendingResume, retryWorkflow } = useRequirementConversation()
 const attachmentInput = ref<HTMLInputElement | null>(null)
 const uploadMenu = ref<HTMLElement | null>(null)
 const fileDragDepth = ref(0)
 const attachmentBlocked = computed(() => !account.value || checkingAuth.value || authBusy.value || busy.value || uploading.value || restoreFailed.value || !!pendingUndo.value || !!deletingId.value || !!renamingId.value || selectedAttachments.value.length >= 3)
+const modelOptions = ref<ModelOption[]>([])
 const modelState = ref<'checking' | 'configured' | 'missing' | 'offline'>('checking')
 const search = ref('')
 const collapsed = ref(false)
@@ -180,6 +181,7 @@ async function checkModel(): Promise<void> {
   try {
     const status = await getModelStatus()
     if (token !== authGeneration) return
+    modelOptions.value = status.providers ?? []
     modelState.value = status.configured ? 'configured' : 'missing'
   } catch { if (token === authGeneration) modelState.value = 'offline' }
 }
@@ -421,9 +423,21 @@ onBeforeUnmount(() => { window.removeEventListener('travelmind:unauthorized', un
             <p v-if="message.attractions?.length && message.knowledge?.clarification && !message.text.includes(message.knowledge.clarification)" class="answer-followup">{{ message.knowledge.clarification }}</p>
             <RestaurantCards v-if="message.role === 'assistant' && message.restaurants?.length" :items="message.restaurants" :category="message.nearby?.category" :provider="message.nearby?.provider" />
             <ItineraryCard v-if="message.role === 'assistant' && message.itinerary" :snapshot="message.itinerary" :origin="message.origin" :undo-available="message.messageId === undoTarget && !pendingUndo" :busy="busy || restoreFailed || checkingAuth || !!deletingId || !!renamingId" @undo="undo(message.messageId!)" @query="input = $event" />
+            <section v-if="message.role === 'assistant' && message.workflow?.status === 'waiting'" class="workflow-choice" aria-label="待补充或选择">
+              <details v-if="message.workflow.preview" open><summary>待采用的候选行程</summary>
+                <div v-for="day in message.workflow.preview.days" :key="day.day"><strong>第{{ day.day }}天</strong><ul><li v-for="activity in day.activities" :key="activity.place.id">{{ activity.start_time }} · {{ activity.place.map.name }} · {{ activity.duration_minutes }}分钟</li></ul></div>
+                <p>演示预算估算：{{ message.workflow.preview.budget.total }}元</p>
+                <p v-for="warning in message.workflow.preview.warnings" :key="warning">{{ warning }}</p>
+              </details>
+              <template v-if="message.messageId === workflowTarget">
+                <p>在下方补充条件并发送，即可继续这次规划。</p>
+                <a-button v-if="message.workflow.can_accept" :disabled="busy || restoreFailed || uploading || !!deletingId || !!renamingId" @click="chooseWorkflow('accept')">采用当前候选行程</a-button>
+                <a-button :disabled="busy || restoreFailed || uploading || !!deletingId || !!renamingId" @click="chooseWorkflow('cancel')">保留现状</a-button>
+              </template><p v-else>此条等待已结束，请以最新对话为准。</p>
+            </section>
             <AnswerSources v-if="message.role === 'assistant' && message.knowledge" :knowledge="message.knowledge" />
             <AttachmentCards v-if="message.role === 'assistant' && sessionId && message.attachments?.length" :session-id="sessionId" :items="message.attachments" :use="message.attachmentUse" :planned="!!message.itinerary" />
-            <span v-if="message.failed" class="failed-note">本条未确认保存，可重试或重新读取</span></div></div>
+            <small v-if="message.role === 'assistant' && message.usedProviders?.length" class="model-used">{{ message.usedProviders.map(name => modelNames[name]).join(' → ') }}</small><span v-if="message.failed" class="failed-note">本条未确认保存，可重试或重新读取</span></div></div>
           <div v-if="restoring" class="thinking" role="status"><span class="thinking-dot" />正在读取已保存对话…</div>
           <div v-else-if="busy" class="message-row assistant stream-message">
             <img class="message-avatar" src="/brand/logo-mark.svg" alt="" /><div class="message-content">
@@ -436,6 +450,7 @@ onBeforeUnmount(() => { window.removeEventListener('travelmind:unauthorized', un
           <a-alert v-if="error" type="error" class="send-error">{{ error }}</a-alert>
           <a-button v-if="restoreFailed" :disabled="busy || !!deletingId" @click="reloadConversation">重试加载</a-button>
           <a-button v-if="pendingUndo" :disabled="busy || restoreFailed || !!deletingId" @click="undo(pendingUndo.target_message_id)">重试撤销</a-button>
+          <a-button v-if="pendingResume && error" :disabled="busy || restoreFailed || uploading || !!deletingId || !!renamingId" @click="retryWorkflow">重试上次接续</a-button>
           <form class="composer" :class="{ 'is-dragging': fileDragDepth > 0 && !attachmentBlocked }" @submit.prevent="send" @dragenter="onFileDragEnter" @dragover="onFileDragOver" @dragleave="fileDragDepth = Math.max(0, fileDragDepth - 1)" @drop="onFileDrop">
             <div v-if="fileDragDepth > 0 && !attachmentBlocked" class="drop-hint" role="status"><ChatIcon name="file" /><strong>松开添加到当前对话</strong><span>上传后可补充旅行要求</span></div>
             <div v-if="selectedAttachments.length || uploading" class="selected-attachments">
@@ -444,7 +459,7 @@ onBeforeUnmount(() => { window.removeEventListener('travelmind:unauthorized', un
             </div>
             <textarea v-model="input" maxlength="6000" :disabled="busy || restoreFailed || checkingAuth || !!deletingId || !!renamingId" aria-label="旅行需求输入" placeholder="告诉我想去哪里，一起慢慢规划…" @keydown="onComposerKeydown" />
             <input ref="attachmentInput" type="file" hidden multiple :accept="attachmentAccept" @change="onAttachmentChange" />
-            <div class="composer-controls"><button class="icon-button attach-button" type="button" aria-label="添加私人附件" title="添加文件或拖入输入框" aria-haspopup="dialog" :disabled="attachmentBlocked" @click="toggleUploadMenu"><ChatIcon name="plus" /></button><span class="composer-mode"><i class="mode-dot" />旅行规划</span><div class="send-group"><span class="keyboard-hint">Enter 发送 · Shift + Enter 换行</span><button class="send" type="submit" :aria-label="busy ? '正在回复' : '发送消息'" :disabled="checkingAuth || busy || uploading || restoreFailed || !!pendingUndo || !!deletingId || !!renamingId || (!input.trim() && !selectedAttachments.length) || modelState !== 'configured'"><ChatIcon :name="busy ? 'more' : 'arrow'" /></button></div></div>
+            <div class="composer-controls"><button class="icon-button attach-button" type="button" aria-label="添加私人附件" title="添加文件或拖入输入框" aria-haspopup="dialog" :disabled="attachmentBlocked" @click="toggleUploadMenu"><ChatIcon name="plus" /></button><span class="composer-mode"><i class="mode-dot" />旅行规划</span><div class="send-group"><select v-model="selectedProvider" class="model-select" aria-label="选择模型" :disabled="checkingAuth || restoring || pendingResume"><option v-for="option in modelOptions" :key="option.id" :value="option.id" :disabled="!option.configured">{{ option.name }}{{ option.configured ? '' : '（未配置）' }}</option></select><span class="keyboard-hint">Enter 发送 · Shift + Enter 换行</span><button v-if="canStop || stopping" type="button" class="stop-generation" :disabled="stopping" @click="stop">{{ stopping ? '停止中…' : '停止' }}</button><button v-else class="send" type="submit" :aria-label="busy ? '正在回复' : '发送消息'" :disabled="checkingAuth || busy || uploading || restoreFailed || !!pendingUndo || !!deletingId || !!renamingId || (!input.trim() && !selectedAttachments.length) || modelState !== 'configured'"><ChatIcon :name="busy ? 'more' : 'arrow'" /></button></div></div>
           </form>
           <div ref="uploadMenu" popover="auto" class="upload-popup" role="dialog" aria-label="添加旅行资料">
             <button class="choose-attachment" type="button" :disabled="attachmentBlocked" @click="uploadMenu?.hidePopover(); attachmentInput?.click()"><ChatIcon name="file" /><span>添加旅行资料<small>攻略、行程单、路线图片</small></span></button>

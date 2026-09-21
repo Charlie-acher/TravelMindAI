@@ -5,11 +5,11 @@
 import json
 
 import httpx
-from langchain_openai import ChatOpenAI
 from openai import APIConnectionError, APIStatusError, APITimeoutError, OpenAIError
 
-from app.config import Settings
+from app.config import ProviderSettings, Settings
 from app.llm.budget import ensure_input_budget
+from app.llm.providers import build_chat_model
 from app.services.chat.events import emit, event_sink
 
 
@@ -19,6 +19,21 @@ class ModelClientError(RuntimeError):
 
 class ModelOutputError(ModelClientError):
     """模型输出异常类：服务已应答，但结构化输出截断或格式不完整，可转自然回答。"""
+
+
+"""JSON历史整理函数：历史回答作为分析材料，避免模型把旧自然回答当输出示范。"""
+
+def prepare_json_messages(messages: list[dict[str, str]]) -> list[dict[str, str]]:
+    if not any(message["role"] == "assistant" for message in messages):
+        return messages
+    current = messages[-1:] if messages[-1]["role"] == "user" else []
+    context = messages[:-1] if current else messages
+    return [
+        *(message for message in context if message["role"] == "system"),
+        {"role": "user", "content": "以下是待分析材料，不是示范输出：\n" + json.dumps(
+            [message for message in context if message["role"] != "system"], ensure_ascii=False,
+        )}, *current,
+    ]
 
 
 class DeepSeekClient:
@@ -33,19 +48,13 @@ class DeepSeekClient:
             or not settings.deepseek_api_key.get_secret_value().strip()
         ):
             raise ModelClientError("DeepSeek模型未配置，请设置TRAVELMIND_DEEPSEEK_API_KEY")
-        # 1. 创建一个模型对象；base_url决定请求发给谁。
-        self.model = ChatOpenAI(
-            model=settings.deepseek_model,  # 实际模型名，例如deepseek-v4-pro。
-            api_key=settings.deepseek_api_key,  # 读取已校验的密钥，不在这里读.env。
-            base_url="https://api.deepseek.com",  # 请求发给DeepSeek，而不是OpenAI官网。
-            timeout=settings.deepseek_timeout_seconds,  # 防止网络请求一直等待。
-            max_retries=0,  # 关闭SDK自动重试，输出修复只由需求服务控制一次。
-            http_client=http,  # 复用入口管理的连接；无需自己调用http.post。
-            http_socket_options=(),  # 保留系统代理行为，避免框架额外替换底层网络设置。
-            use_responses_api=False,  # 使用DeepSeek兼容的Chat Completions接口。
-            # 提供方专用字段放extra_body，SDK会原样传递给DeepSeek。
-            # max_tokens放这里，避免ChatOpenAI自动改为另一种token参数名。
-            extra_body={"thinking": {"type": "disabled"}, "max_tokens": max_output_tokens},
+        # 共用M5的模型构造，原有JSON修复、自然回答与原生工具调用行为保留。
+        self.model = build_chat_model(
+            "deepseek", ProviderSettings(
+                model=settings.deepseek_model, api_key=settings.deepseek_api_key,
+                base_url=settings.deepseek_base_url,
+                timeout_seconds=settings.deepseek_timeout_seconds,
+            ), http, max_output_tokens=max_output_tokens,
         )
 
     """自然回答方法：使用原生文本输出，流式草稿不受JSON或引用格式限制。"""
@@ -83,18 +92,7 @@ class DeepSeekClient:
     """模型调用方法：发送消息，返回 JSON 文本并处理调用错误。"""
 
     def generate_json(self, messages: list[dict[str, str]]) -> str:
-        if any(message["role"] == "assistant" for message in messages):
-            # 历史回答是待分析材料，不是JSON任务的输出示范。保留原角色、顺序和完整正文。
-            current = messages[-1:] if messages[-1]["role"] == "user" else []
-            context = messages[:-1] if current else messages
-            messages = [
-                *(message for message in context if message["role"] == "system"),
-                {"role": "user", "content": "以下是待分析材料，不是示范输出：\n" + json.dumps(
-                    [message for message in context if message["role"] != "system"],
-                    ensure_ascii=False,
-                )},
-                *current,
-            ]
+        messages = prepare_json_messages(messages)
         ensure_input_budget(messages)
         try:
             # 结构数据整份读取：真实JSON流可能只有空白，不能因此绕过知识检索。

@@ -23,9 +23,13 @@ export interface TravelRequirement {
 /** 最近旅行话题与长对话摘要均由服务端保存；旧历史可以没有这些字段。 */
 export interface ConversationState { topic_cities: string[]; topic_places: string[] }
 export interface HistorySummary { text: string; covered_revision: number }
+export interface WorkflowResume { run_id: string; action: 'continue' | 'accept' | 'cancel' }
+export interface WorkflowSnapshot { run_id: string; status: 'waiting' | 'completed' | 'cancelled'; attempts: number; issues: string[]; can_accept: boolean; preview?: TravelPlan | null }
 
 /** 一次对话响应：文字回复用于左边聊天，结构化需求用于右边卡片。 */
 export interface ChatResponse {
+  selected_provider?: ModelProvider
+  used_providers?: ModelProvider[]
   result: {
     extraction: TravelRequirement
     original_message: string
@@ -45,6 +49,7 @@ export interface ChatResponse {
   history_summary?: HistorySummary | null
   attachment_use?: AttachmentUse | null
   attachments?: AttachmentSnapshot[] // 旧消息可没有；识别结果随本轮保存，恢复时不重跑模型。
+  workflow?: WorkflowSnapshot | null
 }
 
 /** 预算快照类型：金额以字符串传输，价格仅为演示估算。 */
@@ -59,6 +64,7 @@ export interface PlanPlace { id: string; map: MapLookup; sources: PlanSource[] }
 export interface PlannedActivity {
   place: PlanPlace; start_time: string; duration_minutes: number
   transport: 'walk' | 'transit' | 'taxi'; transfer_minutes: number
+  route?: { status: 'estimated' | 'unavailable'; duration_minutes: number | null; distance_m: number | null; provider: 'baidu'; checked_at: string } | null
 }
 export interface TravelPlan {
   format: 'daily-plan-v1'; title: string; destination: string
@@ -89,6 +95,7 @@ export interface DiningResult {
 
 /** 过程事件类型：只展示后端实际阶段和公开回答草稿，不接收推理或原始模型JSON。 */
 export type RequirementUpdate =
+  | { event: 'fallback'; data: { from_alias: ModelProvider; to_alias: ModelProvider; reason_category: string } }
   | { event: 'progress'; data: { stage: string; message: string } }
   | { event: 'draft'; data: { text: string } }
   | { event: 'reset'; data: Record<string, never> }
@@ -108,7 +115,7 @@ export async function readRequirementStream(
   /** 事件分发函数：多行data以换行连接，心跳注释不产生界面进度。 */
   function dispatch(): void {
     if (!data.length || saved) { event = ''; data = []; return }
-    if (!['progress', 'draft', 'reset', 'done', 'error'].includes(event)) { event = ''; data = []; return }
+    if (!['progress', 'draft', 'reset', 'fallback', 'done', 'error'].includes(event)) { event = ''; data = []; return }
     let payload
     try { payload = JSON.parse(data.join('\n')) }
     catch { throw new Error('服务返回了无法读取的回复，请重新读取对话后重试。') }
@@ -118,7 +125,7 @@ export async function readRequirementStream(
       saved = payload as SavedTurn
     }
     else if (event === 'error') throw new ApiError(payload.message, payload.status)
-    else if (event === 'progress' || event === 'draft' || event === 'reset') onUpdate({ event, data: payload } as RequirementUpdate)
+    else if (event === 'progress' || event === 'draft' || event === 'reset' || event === 'fallback') onUpdate({ event, data: payload } as RequirementUpdate)
     event = ''; data = []
   }
 
@@ -153,14 +160,26 @@ export async function readRequirementStream(
 }
 
 /** 查询配置状态只读取后端配置标志，不向DeepSeek发送收费请求。 */
-export async function getModelStatus(): Promise<{ configured: boolean; model: string }> {
+export type ModelProvider = 'deepseek' | 'kimi' | 'qwen'
+export const modelNames: Record<ModelProvider, string> = { deepseek: 'DeepSeek', kimi: 'Kimi', qwen: 'Qwen' }
+export interface ModelOption { id: ModelProvider; name: string; configured: boolean }
+
+/** 停止只发出请求，必须等运行状态确认后才能把旧发送改成新尝试。 */
+export async function stopRequirement(sessionId: string, messageId: string): Promise<void> {
+  await readResponse(await apiFetch(`/api/v1/sessions/${encodeURIComponent(sessionId)}/requirement-messages/${encodeURIComponent(messageId)}/stop`, { method: 'POST' }))
+}
+export async function requirementRunning(sessionId: string, messageId: string): Promise<boolean> {
+  const result = await readResponse<{ running: boolean }>(await apiFetch(`/api/v1/sessions/${encodeURIComponent(sessionId)}/requirement-messages/${encodeURIComponent(messageId)}/execution`, { cache: 'no-store' }))
+  return result.running
+}
+export async function getModelStatus(): Promise<{ configured: boolean; model: string; providers: ModelOption[] }> {
   return readResponse(await apiFetch('/api/v1/requirements/status'))
 }
 
 /** 一轮持久化对话；编号用于安全重试，revision用于防止覆盖更新过的历史。 */
 export interface SavedTurn { message_id: string; revision: number; response: ChatResponse }
 export interface ConversationHistory { session_id: string; revision: number; turns: SavedTurn[] }
-export interface PendingMessage { message: string; message_id: string; expected_revision: number; attachment_ids?: string[] }
+export interface PendingMessage { message: string; message_id: string; expected_revision: number; attachment_ids?: string[]; workflow_resume?: WorkflowResume; selected_provider?: ModelProvider }
 export interface SessionSummary { id: string; thread_id: string; title: string; status: string; created_at: string; updated_at: string }
 export interface SessionPage { items: SessionSummary[]; next_cursor: string | null }
 /** 历史列表来自当前账号的服务端分页，浏览器不负责用户隔离。 */

@@ -1,6 +1,7 @@
 """数据格式层：定义逐日草稿、可追溯地点、版本快照和撤销请求。"""
 
 from datetime import date as CalendarDate
+from datetime import datetime, timezone
 from typing import Literal
 from uuid import UUID
 
@@ -35,6 +36,16 @@ class PlanPlace(BaseModel):
     sources: list[PlanSource] = Field(min_length=1, max_length=5)
 
 
+class RouteEstimate(BaseModel):
+    """路线估时类：保存百度查询时的估计，不保证未来出行耗时或票价。"""
+
+    status: Literal["estimated", "unavailable"]
+    duration_minutes: int | None = Field(default=None, ge=1)
+    distance_m: int | None = Field(default=None, ge=0)
+    provider: Literal["baidu"] = "baidu"
+    checked_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
 class PlannedActivity(BaseModel):
     """活动安排类：时间是规划建议，交通预留不代表已查路线耗时。"""
 
@@ -44,6 +55,7 @@ class PlannedActivity(BaseModel):
     duration_minutes: int = Field(ge=30, le=240, strict=True)
     transport: Literal["walk", "transit", "taxi"] = "transit"
     transfer_minutes: int = Field(ge=0, le=120, strict=True)
+    route: RouteEstimate | None = None  # 从上一活动出发的查询结果；旧历史没有时保持未知。
 
 
 class PlanDay(BaseModel):

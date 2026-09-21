@@ -27,6 +27,7 @@ dependencies = [
     "langgraph>=1,<2",
     "langchain[mcp]>=1.4.0,<1.5.0",
     "pillow>=12,<13",
+    "langgraph-checkpoint-postgres==3.1.2", # 与0014官方表结构配套，升级时同步迁移。
 ]
 
 # 开发工具只用于开发/测试，未来部署时可以用 uv sync --no-dev 排除。

@@ -81,7 +81,7 @@ function money(value: string): string {
                   <p v-if="activity.place.map.address" class="activity-address">{{ activity.place.map.address }}</p>
                   <div v-for="source in activity.place.sources" :key="source.id" class="source"><span>{{ source.kind === 'attachment' ? '私人附件' : source.kind === 'web' ? '网页' : '知识库' }}</span><a v-if="source.url && /^https?:\/\//i.test(source.url)" :href="source.url" target="_blank" rel="noopener noreferrer">{{ source.title }} ↗</a><strong v-else>{{ source.title }}</strong><p>{{ source.text }}</p></div>
                 </details>
-                <p v-if="index < day.activities.length - 1" class="transfer">↓ {{ transportLabels[day.activities[index + 1]!.transport] }} · 预留 {{ day.activities[index + 1]!.transfer_minutes }} 分钟 · 待核实</p>
+                <p v-if="index < day.activities.length - 1" class="transfer">↓ {{ transportLabels[day.activities[index + 1]!.transport] }} · 预留 {{ day.activities[index + 1]!.transfer_minutes }} 分钟 · <span v-if="day.activities[index + 1]!.route?.status === 'estimated'" :title="`百度查询时间：${day.activities[index + 1]!.route!.checked_at}`">地图估时 {{ day.activities[index + 1]!.route!.duration_minutes }} 分钟</span><span v-else>路线待核实</span></p>
               </div>
             </li>
           </ol>
@@ -93,7 +93,7 @@ function money(value: string): string {
           <div class="budget-bar" :class="{ over: snapshot.plan.budget.over_budget }" aria-hidden="true"><span :style="{ width: `${budgetPercent}%` }"></span></div>
           <div class="budget-balance"><span>总预算 ¥{{ money(snapshot.plan.budget.total_budget) }}</span><strong :class="{ over: snapshot.plan.budget.over_budget }">{{ snapshot.plan.budget.over_budget ? '超出预算' : '预算余额' }} ¥{{ money(String(Math.abs(Number(snapshot.plan.budget.remaining)))) }}</strong></div>
           <details class="budget-details"><summary>预算明细与假设</summary><dl><div v-for="(amount, key) in snapshot.plan.budget.costs" :key="key"><dt>{{ costLabels[key] || key }}</dt><dd>¥{{ money(amount) }}</dd></div><div><dt>预备金</dt><dd>¥{{ money(snapshot.plan.budget.contingency) }}</dd></div></dl><ul><li v-for="assumption in snapshot.plan.budget.assumptions" :key="assumption">{{ assumption }}</li></ul></details>
-          <p class="estimate-note">采用演示单价估算，非实时门票、酒店或车票报价。交通时间仅为预留建议，未核实路线耗时。</p>
+          <p class="estimate-note">采用演示单价估算，非实时门票、酒店或车票报价。交通以各段核实状态为准，地图估时反映查询时情况，出发前请再确认。</p>
         </section>
         <section class="plan-queries" aria-label="继续查询"><h4>出发前，再确认一下</h4><button type="button" class="weather-query" :disabled="busy" @click="queryWeather"><span>查询天气<small>按行程日期确认天气与出行安排</small></span><span>↗</span></button><details class="ticket-details"><summary>门票与往返交通</summary><p>门票、机票、火车票待查询。门票价格与预约请到景区官方核对。</p><div class="ticket-links"><a href="https://www.12306.cn/index/" target="_blank" rel="noopener noreferrer">12306 查火车票 ↗</a><a href="https://www.airchina.com.cn/zh-CN" target="_blank" rel="noopener noreferrer">国航官网查机票 ↗</a></div></details><details v-if="snapshot.plan.warnings.length" class="travel-notes"><summary>行程说明 · {{ snapshot.plan.warnings.length }} 项</summary><ul class="plan-warnings"><li v-for="warning in snapshot.plan.warnings" :key="warning">{{ warning }}</li></ul></details><p class="query-hint">查询会先填入输入框，你可以补充后再发送。</p></section>
       </aside>

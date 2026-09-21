@@ -3,15 +3,15 @@
 */
 import { computed, nextTick, ref } from 'vue'
 import {
-  createConversation, deleteSession, readConversation, sendRequirement, undoItinerary,
-  type ChatResponse, type DiningResult, type DiningItem, type PendingMessage, type SavedTurn, type PlanSnapshot, type UndoDraftRequest,
+  createConversation, deleteSession, readConversation, sendRequirement, stopRequirement, requirementRunning, undoItinerary, modelNames, type ModelProvider,
+  type ChatResponse, type DiningResult, type DiningItem, type PendingMessage, type SavedTurn, type PlanSnapshot, type UndoDraftRequest, type WorkflowSnapshot, type WorkflowResume,
 } from './api/requirements'
 import { ApiError } from './api/http'
 import type { AnswerResult, AttractionCard } from './api/documents'
 import { listAttachments, uploadAttachment, type AttachmentSnapshot, type AttachmentUse } from './api/attachments'
 
 /** 消息类型：气泡只展示自然语言，知识依据由后端保存和校验。 */
-interface ChatMessage { origin?: string | null; id: string; role: 'user' | 'assistant'; text: string; failed?: boolean; attachments?: AttachmentSnapshot[]; attachmentUse?: AttachmentUse | null; knowledge?: AnswerResult | null; attractions?: AttractionCard[]; restaurants?: DiningItem[]; nearby?: DiningResult | null; clarification?: string | null; itinerary?: PlanSnapshot | null; messageId?: string; process?: { steps: { stage: string; message: string }[]; draft: string; seconds: number } }
+interface ChatMessage { usedProviders?: ModelProvider[]; workflow?: WorkflowSnapshot | null; origin?: string | null; id: string; role: 'user' | 'assistant'; text: string; failed?: boolean; attachments?: AttachmentSnapshot[]; attachmentUse?: AttachmentUse | null; knowledge?: AnswerResult | null; attractions?: AttractionCard[]; restaurants?: DiningItem[]; nearby?: DiningResult | null; clarification?: string | null; itinerary?: PlanSnapshot | null; messageId?: string; process?: { steps: { stage: string; message: string }[]; draft: string; seconds: number } }
 const legacyStorageKey = 'travelmind.requirement-conversation.v1'
 const welcome = '你好，想去哪里旅行？\n你可以告诉我时间、人数和预算，也可以先问问感兴趣的地方。无法确认的信息，我会直接说明。'
 
@@ -19,22 +19,30 @@ const welcome = '你好，想去哪里旅行？\n你可以告诉我时间、人�
 export function useRequirementConversation() {
   const messages = ref<ChatMessage[]>([{ id: 'welcome', role: 'assistant', text: welcome }])
   const input = ref('')
+  const selectedProvider = ref<ModelProvider>('deepseek')
   const response = ref<ChatResponse | null>(null)
   const sessionId = ref<string | null>(null)
   const revision = ref(0)
   const sending = ref(false)
+  const stopping = ref(false)
+  const received = ref(false)
+  const canStop = computed(() => sending.value && received.value && !stopping.value)
   const selectedAttachments = ref<AttachmentSnapshot[]>([])
   const uploading = ref(false)
   const draft = ref('')
   const progress = ref<{ stage: string; message: string }[]>([])
   const restoring = ref(false)
   const restoreFailed = ref(false)
-  const busy = computed(() => sending.value || restoring.value)
+  const busy = computed(() => sending.value || restoring.value || stopping.value)
   const error = ref('')
   const storageWarning = ref('')
   const chatArea = ref<HTMLElement | null>(null)
   let pending: PendingMessage | null = null
+  const pendingResume = ref(false)
   const pendingUndo = ref<UndoDraftRequest | null>(null)
+  // 只允许接续最后一轮等待；失败的临时用户气泡不使原选择丢失。
+  const workflowMessage = computed(() => [...messages.value].reverse().find(item => item.role === 'assistant'))
+  const workflowTarget = computed(() => workflowMessage.value?.workflow?.status === 'waiting' ? workflowMessage.value.messageId ?? null : null)
   // 只有最后一轮允许撤销；后面出现新消息时，旧卡片立即失效。
   const undoTarget = computed(() => {
     const last = messages.value.at(-1)
@@ -50,6 +58,7 @@ export function useRequirementConversation() {
   async function addAttachments(files: File[]): Promise<void> {
     if (!files.length || busy.value || uploading.value || restoreFailed.value || !storageKey) return
     error.value = ''
+    if (pending?.workflow_resume) { error.value = '上次接续尚未确认，请先重试或保留现状。'; return }
     if (files.length + selectedAttachments.value.length > 3) { error.value = '每条消息最多选择3份附件。'; return }
     if (files.some(file => !/\.(png|jpe?g|webp|pdf|docx|txt|md|markdown)$/i.test(file.name))) { error.value = '附件格式仅支持 PNG、JPEG、WebP、PDF、DOCX、TXT 和 Markdown。'; return }
     if (files.some(file => !file.size || file.size > (/\.pdf$/i.test(file.name) ? 30_000_000 : 10 * 1024 * 1024))) {
@@ -81,6 +90,7 @@ export function useRequirementConversation() {
   /** 移除函数：只取消本条选择，保留服务器上的历史原件。 */
   function removeAttachment(id: string): void {
     if (busy.value || uploading.value) return
+    if (pending?.workflow_resume) { error.value = '上次接续尚未确认，请先重试或保留现状。'; return }
     selectedAttachments.value = selectedAttachments.value.filter(item => item.id !== id)
     pending = null
     remember()
@@ -88,6 +98,7 @@ export function useRequirementConversation() {
 
   /** 刷新后仍可找回这次发送的编号；服务器已提交时，重试不会重复保存。 */
   function remember(): void {
+    pendingResume.value = !!pending?.workflow_resume
     if (!storageKey) return
     try {
       if (sessionId.value) sessionStorage.setItem(storageKey, JSON.stringify({ sessionId: sessionId.value, pending, pendingUndo: pendingUndo.value }))
@@ -120,9 +131,9 @@ export function useRequirementConversation() {
     // 出发地跟随本轮快照，后续修改城市不能改写旧草稿的标题。
     messages.value.push(
       { id: `${turn.message_id}-user`, role: 'user', text: turn.response.result.original_message, attachments: turn.response.attachments ?? [] },
-      { id: `${turn.message_id}-assistant`, messageId: turn.message_id, role: 'assistant', text: reply, attachmentUse: turn.response.attachment_use, attachments: turn.response.attachments ?? [], knowledge: turn.response.knowledge, attractions: turn.response.knowledge?.attractions ?? [], restaurants: turn.response.dining?.items ?? [], nearby: turn.response.dining, clarification: turn.response.knowledge?.clarification, itinerary: turn.response.itinerary, origin: turn.response.result.extraction?.origin ?? null },
+      { id: `${turn.message_id}-assistant`, messageId: turn.message_id, role: 'assistant', text: reply, usedProviders: turn.response.used_providers, attachmentUse: turn.response.attachment_use, attachments: turn.response.attachments ?? [], knowledge: turn.response.knowledge, attractions: turn.response.knowledge?.attractions ?? [], restaurants: turn.response.dining?.items ?? [], nearby: turn.response.dining, clarification: turn.response.knowledge?.clarification, itinerary: turn.response.itinerary, workflow: turn.response.workflow, origin: turn.response.result.extraction?.origin ?? null },
     )
-    if (turn.response.status === 'needs_clarification' || turn.response.status === 'complete') response.value = turn.response
+    if (turn.response.status === 'needs_clarification' || turn.response.status === 'complete' || turn.response.workflow?.status === 'cancelled') response.value = turn.response
     else if (response.value) response.value = { ...response.value, changed_fields: [] }
     revision.value = turn.revision
   }
@@ -152,12 +163,16 @@ export function useRequirementConversation() {
         response.value = null
         revision.value = history.revision
         history.turns.forEach(showTurn)
+        selectedProvider.value = pending?.selected_provider ?? history.turns.at(-1)?.response.selected_provider ?? 'deepseek'
         // 历史不是刚发生的修改，恢复后不继续高亮某一轮的旧字段。
         if (response.value) response.value = { ...(response.value as ChatResponse), changed_fields: [] }
         if (pending && history.turns.some(turn => turn.message_id === pending?.message_id)) {
           pending = null
           selectedAttachments.value = []
           input.value = ''
+          remember()
+        } else if (pending?.workflow_resume && history.revision > pending.expected_revision) {
+          pending = null
           remember()
         } else if (pending) {
           input.value = pending.message
@@ -210,13 +225,19 @@ export function useRequirementConversation() {
   }
 
   /** 成功保存才更新需求卡片；超时或断网保留原话和同一个消息编号。 */
-  async function send(): Promise<void> {
+  async function send(action: WorkflowResume['action'] = 'continue'): Promise<void> {
     const text = input.value.trim()
+    const provider = selectedProvider.value
     if ((!text && !selectedAttachments.value.length) || busy.value || uploading.value || restoreFailed.value) return
     const attachments = [...selectedAttachments.value]
     const attachmentIds = attachments.map(item => item.id)
+    if (pending?.workflow_resume && action !== 'cancel' && (pending.message !== text || (pending.selected_provider ?? 'deepseek') !== provider || JSON.stringify(pending.attachment_ids ?? []) !== JSON.stringify(attachmentIds))) {
+      error.value = '上次接续尚未确认，请重试上次接续，或清空输入后选择保留现状。'
+      return
+    }
     if (pendingUndo.value) { error.value = '上次撤销尚未确认保存，请先重试撤销。'; return }
     sending.value = true
+    received.value = false
     // 原话和附件由本次请求保存，输入框立即留给下一条消息。
     input.value = ''
     selectedAttachments.value = []
@@ -231,8 +252,9 @@ export function useRequirementConversation() {
         sessionId.value = createdId
       }
       if (token !== generation) return
-      if (!pending || pending.message !== text || JSON.stringify(pending.attachment_ids ?? []) !== JSON.stringify(attachmentIds)) {
-        pending = { message: text, message_id: crypto.randomUUID(), expected_revision: revision.value, attachment_ids: attachmentIds }
+      if (!pending || pending.message !== text || (pending.selected_provider ?? 'deepseek') !== provider || JSON.stringify(pending.attachment_ids ?? []) !== JSON.stringify(attachmentIds)) {
+        pending = { message: text, message_id: crypto.randomUUID(), expected_revision: revision.value, attachment_ids: attachmentIds, selected_provider: provider }
+        if (workflowTarget.value && workflowMessage.value?.workflow) pending.workflow_resume = { run_id: workflowMessage.value.workflow.run_id, action }
       }
       remember()
       const bubbleId = `${pending.message_id}-user`
@@ -242,8 +264,10 @@ export function useRequirementConversation() {
       const turn = await sendRequirement(sessionId.value, pending, update => {
         // 退出或切换账号后，旧连接的每一块数据都不能再画回页面。
         if (token !== generation) return
+        if (update.event === 'progress' && update.data.stage === 'received') received.value = true
         if (update.event === 'draft') draft.value = update.data.text
         else if (update.event === 'reset') draft.value = ''
+        else if (update.event === 'fallback') progress.value.push({ stage: 'model', message: `${modelNames[update.data.from_alias]} 暂不可用，已切换至 ${modelNames[update.data.to_alias]}` })
         else progress.value.push(update.data)
         void scrollToLatest()
       })
@@ -265,19 +289,64 @@ export function useRequirementConversation() {
       if (failed) failed.failed = true
       if (cause instanceof ApiError && cause.status === 409) {
         // 已有其他请求提交：恢复后让用户重新确认这句话，不自动覆盖别人刚改的内容。
-        pending = null
+        if (!pending?.workflow_resume) pending = null
         remember()
         const recovery = reloadConversation()
         const recoveryToken = generation
         sending.value = false // 恢复函数已同步进入restoring，409完成后不会留下发送锁。
         await recovery
-        if (generation === recoveryToken && !restoreFailed.value) error.value = '已恢复最新对话，请核对消息后重新发送。'
+        if (generation === recoveryToken && !restoreFailed.value) error.value = pending?.workflow_resume ? '上次接续仍未确认，请重试上次接续。' : '已恢复最新对话，请核对消息后重新发送。'
       } else {
         error.value = cause instanceof Error ? cause.message : '发送失败，请检查网络后重试。'
       }
     } finally {
       if (token === generation) { clearStream(); sending.value = false; void scrollToLatest() }
     }
+  }
+
+  /** 停止函数：服务确认结束后恢复历史；已提交的迟到结果由历史读取，不重复发送。 */
+  async function stop(): Promise<void> {
+    if (!canStop.value || !sessionId.value || !pending) return
+    const id = sessionId.value, messageId = pending.message_id, token = generation
+    const provider = selectedProvider.value
+    let confirmed = false
+    stopping.value = true
+    try {
+      await stopRequirement(id, messageId)
+      const deadline = Date.now() + 65_000
+      while (await requirementRunning(id, messageId)) {
+        if (token !== generation) return
+        if (Date.now() > deadline) throw new Error('停止请求已送达，仍在等待外部查询结束，请稍后再确认。')
+        await new Promise(resolve => window.setTimeout(resolve, 500))
+      }
+      if (token !== generation) return
+      confirmed = true
+      await reloadConversation()
+      if (sessionId.value !== id) return
+      if (pending && !pending.workflow_resume) { pending = null; remember() }
+      selectedProvider.value = provider
+      error.value = pending?.workflow_resume ? '接续已停止，可重试原接续或选择保留现状。' : '生成已停止，可选择模型后重新发送。'
+    } catch (cause) {
+      if (token === generation) error.value = cause instanceof Error ? cause.message : '停止未确认，请重试。'
+    } finally { stopping.value = false; if (confirmed) sending.value = false }
+  }
+
+  /** 明确选择函数：沿用发送、失败重试与版本保护；不覆盖用户正在写的补充内容。 */
+  async function chooseWorkflow(action: 'accept' | 'cancel'): Promise<void> {
+    if (!workflowTarget.value || busy.value || restoreFailed.value || uploading.value) return
+    if (action === 'accept' && !workflowMessage.value?.workflow?.can_accept) return
+    if (input.value.trim() || selectedAttachments.value.length) { error.value = '请先发送或清空输入中的补充内容。'; return }
+    input.value = action === 'accept' ? '采用当前候选行程' : '保留现状，结束本次规划'
+    await send(action)
+  }
+
+  /** 原请求重试函数：从内存恢复相同原话、附件编号及选择，避免图恢复使用新编号。 */
+  async function retryWorkflow(): Promise<void> {
+    if (!pending?.workflow_resume || busy.value || uploading.value || restoreFailed.value) return
+    input.value = pending.message
+    selectedProvider.value = pending.selected_provider ?? 'deepseek'
+    selectedAttachments.value = (pending.attachment_ids ?? []).map(id => ({ id, file_name: `附件 ${id}`, analysis: null, error_message: null }))
+    await send(pending.workflow_resume.action)
   }
 
   /** 撤销函数：失败保留同一请求，成功同步消息、需求和版本；切换会话后拒绝回写。 */
@@ -320,6 +389,7 @@ export function useRequirementConversation() {
 
   /** 新建会话由后端先保存空记录；切换时丢弃旧对话的未发送输入。 */
   function openEmpty(id: string): void {
+    selectedProvider.value = 'deepseek'
     ++generation
     clearStream()
     sessionId.value = id
@@ -356,6 +426,7 @@ export function useRequirementConversation() {
 
   /** 清空函数：销毁可见数据并阻止旧请求回写；删除当前会话时保留账号存储键。 */
   function clearConversation(clearAccount = true): void {
+    selectedProvider.value = 'deepseek'
     ++generation
     clearStream()
     sessionId.value = null
@@ -380,9 +451,10 @@ export function useRequirementConversation() {
   }
 
   return {
-    messages, input, response, sessionId, revision, busy, restoring, restoreFailed, draft, progress,
+    messages, input, selectedProvider, response, sessionId, revision, busy, stopping, canStop, stop, restoring, restoreFailed, draft, progress,
     error, storageWarning, chatArea, initialize, reloadConversation, send, undoDraft, undoTarget, pendingUndo,
     openEmpty, selectConversation, clearConversation, deleteConversation,
     selectedAttachments, uploading, addAttachments, removeAttachment,
+    workflowTarget, chooseWorkflow, pendingResume, retryWorkflow,
   }
 }

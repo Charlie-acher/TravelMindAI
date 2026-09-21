@@ -48,12 +48,15 @@ def merge_analyses(results: list[AttachmentAnalysis]) -> AttachmentAnalysis:
     points = {}
     warnings = list(dict.fromkeys(w for result in results for w in result.warnings))
     cities = list(dict.fromkeys(r.city.removesuffix("市") for r in results if r.city))
+    # OCR和视觉对完整路线的地点及次序一致时保留；分批、缺项或冲突时仍不拼接顺序。
+    routes = [[(normalize_text(p.name), p.order) for p in r.waypoints] for r in results]
+    same_route = bool(routes) and all(route == routes[0] for route in routes)
     for result in results:
         for point in result.waypoints:
             key = normalize_text(point.name)
             if key not in points:
                 points[key] = (point.model_copy(update={"order": None})
-                               if len(results) > 1 else point)
+                               if len(results) > 1 and not same_route else point)
     if len(cities) > 1:
         warnings.append("附件涉及多个城市：" + "、".join(cities) + "，按本次目的地选用。")
     if len(points) > 300 or len(warnings) > 29:

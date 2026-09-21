@@ -7,7 +7,9 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from app.llm.contracts import SelectableProvider
 from app.schemas.requirement.chat import RequirementChatResponse
+from app.schemas.workflow import WorkflowResume
 
 
 class SavedRequirementMessage(BaseModel):
@@ -18,6 +20,8 @@ class SavedRequirementMessage(BaseModel):
     message_id: UUID
     expected_revision: int = Field(ge=0, strict=True)
     attachment_ids: list[UUID] = Field(default_factory=list, max_length=3)
+    workflow_resume: WorkflowResume | None = None
+    selected_provider: SelectableProvider = "deepseek"
 
     """消息内容校验函数：只发附件时保留空原话，文字和附件不能同时为空。"""
 

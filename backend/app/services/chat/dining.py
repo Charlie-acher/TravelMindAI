@@ -296,9 +296,10 @@ def handle_nearby(message: str, destination: str | None, turns: list[SavedRequir
 
     middleware: list[AgentMiddleware[Any, Any, Any]] = [
         finish, ModelCallLimitMiddleware(run_limit=8 if mcp and mcp.tools else 3), choose]
+    # 地图结果保存在本轮闭包，恢复由外层聊天节点负责，不能继承半途工具检查点。
     agent = create_agent(model, tools=actions,
                          system_prompt=SYSTEM + (MCP_SYSTEM if mcp and mcp.tools else ""),
-                         middleware=middleware)
+                         middleware=middleware, checkpointer=False)
     context = {"message": message, "destination": destination, "recent_turns": recent,
                "conversation_history": (history_messages if history_messages is not None
                                         else build_history_messages(selected)),
@@ -310,7 +311,7 @@ def handle_nearby(message: str, destination: str | None, turns: list[SavedRequir
         # 旧回答只作材料；本轮真正的工具调用和结果继续由框架按原生角色管理。
         agent.invoke({"messages": [{"role": "user",
                                    "content": json.dumps(context, ensure_ascii=False)}]},
-                     config={"max_concurrency": 1, "recursion_limit": 60})
+                     config={"max_concurrency": 1, "recursion_limit": 60}, durability="async")
     except GraphRecursionError:
         raise ModelOutputError("本轮查询未完成") from None
     if not finished:

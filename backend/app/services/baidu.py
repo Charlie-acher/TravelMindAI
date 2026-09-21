@@ -6,7 +6,7 @@
 import json
 import re
 from contextlib import ExitStack
-from math import asin, cos, isfinite, radians, sin, sqrt
+from math import asin, ceil, cos, isfinite, radians, sin, sqrt
 from typing import Any, Literal, Self
 
 from langchain_core.messages import ToolMessage
@@ -16,6 +16,7 @@ from pydantic import ValidationError
 from app.config import Settings
 from app.schemas.dining import DiningItem, DiningResult
 from app.schemas.document.answer import GeoPoint, MapLookup
+from app.schemas.itinerary import RouteEstimate
 from app.services.baidu_mcp import BaiduMCPClient, MCPTools
 
 """数字读取函数：接口数字或字符串必须有限，布尔值不当成价格或评分。"""
@@ -90,6 +91,31 @@ class BaiduMaps:
             raise ToolException("百度地图未返回可核对的地点数据")
         return body
 
+    """路线查询函数：只接百度坐标，读取路线秒数；失败返回未知，不猜距离或耗时。"""
+
+    def route(self, origin: GeoPoint, destination: GeoPoint,
+              transport: Literal["walk", "transit", "taxi"]) -> RouteEstimate:
+        unavailable = RouteEstimate(status="unavailable")
+        if origin.coordinate_system != "BD-09" or destination.coordinate_system != "BD-09":
+            return unavailable
+        try:
+            body = self.query("map_directions",
+                model={"walk": "walking", "transit": "transit", "taxi": "driving"}[transport],
+                origin=f"{origin.latitude},{origin.longitude}",
+                destination=f"{destination.latitude},{destination.longitude}",
+                is_chinese_mainland="true")
+            routes = body.get("result", {}).get("routes", [])
+            if not routes:
+                return unavailable
+            duration = read_number(routes[0].get("duration"))
+            distance = read_number(routes[0].get("distance"))
+            if duration is None or duration <= 0 or distance is None or distance < 0:
+                return unavailable
+            return RouteEstimate(status="estimated", duration_minutes=ceil(duration / 60),
+                                 distance_m=ceil(distance))
+        except (ToolException, ValueError, TypeError, AttributeError, IndexError):
+            return unavailable
+
     """地点核对函数：唯一同名且同城的POI才能入卡，不把行政中心冒充景点。"""
 
     def lookup(self, city: str, name: str) -> MapLookup:
@@ -105,6 +131,9 @@ class BaiduMaps:
                        and self._same_name(poi, name, city)
                        and self._same_place_kind(poi, name)
                        and self._same_city(poi, city)]
+            # 同城主体的精确原名优先于别名；多个精确同名结果仍保留歧义。
+            exact = [poi for poi in matches if poi.get("name") == name]
+            matches = exact or matches
             if len(matches) != 1:
                 return result.model_copy(update={"status": "ambiguous" if matches else "no_match"})
             poi = matches[0]

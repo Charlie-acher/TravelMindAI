@@ -3,6 +3,8 @@
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
+from threading import Event
+from typing import Any
 
 from pydantic_core import from_json
 
@@ -11,11 +13,26 @@ from app.schemas.document.answer import AnswerPoint
 EventSink = Callable[[str, dict[str, object]], None]
 event_sink: ContextVar[EventSink | None] = ContextVar("chat_event_sink", default=None)
 answer_sources: ContextVar[set[int] | None] = ContextVar("chat_answer_sources", default=None)
+request_cancelled: ContextVar[Event | None] = ContextVar("chat_cancelled", default=None)
+research_tasks: ContextVar[list[dict[str, Any]] | None] = ContextVar("research_tasks", default=None)
+
+
+class ChatCancelled(RuntimeError):
+    """停止异常类：取消当前执行，不计入模型故障，也不提交未完成候选。"""
+
+
+"""停止检查函数：外部调用前后和发布前检查，已进入事务的提交仍按幂等恢复。"""
+
+def check_cancelled() -> None:
+    signal = request_cancelled.get()
+    if signal is not None and signal.is_set():
+        raise ChatCancelled("本次生成已停止，已有行程保留。")
 
 
 """事件发送函数：普通 JSON 请求没有监听器，仍走同一业务逻辑。"""
 
 def emit(event: str, **data: object) -> None:
+    check_cancelled()
     sink = event_sink.get()
     if sink is not None:
         sink(event, data)
