@@ -28,7 +28,7 @@ export async function listPersonalFiles(options: {
 }
 
 /** 文件详情函数：版本编号始终使用行程UUID，不用标题或文件名匹配。 */
-export async function getPersonalFile(item: PersonalFileItem): Promise<PersonalFileDetail> {
+export async function getPersonalFile(item: Pick<PersonalFileItem, 'id' | 'kind'>): Promise<PersonalFileDetail> {
   return readResponse(await apiFetch(`/api/v1/personal-files/${item.kind}/${encodeURIComponent(item.id)}`, { cache: 'no-store' }))
 }
 

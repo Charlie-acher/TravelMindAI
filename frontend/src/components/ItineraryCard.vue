@@ -3,8 +3,9 @@
 import { computed, ref } from 'vue'
 import type { PlanSnapshot, PlanPlace } from '../api/requirements'
 import { baiduMapLink } from '../mapLink'
+import ChatIcon from './ChatIcon.vue'
 
-const props = defineProps<{ snapshot: PlanSnapshot; origin?: string | null; undoAvailable: boolean; busy: boolean }>()
+const props = defineProps<{ snapshot: PlanSnapshot; origin?: string | null; undoAvailable: boolean; busy: boolean; compact?: boolean }>()
 const cardElement = ref<HTMLElement | null>(null)
 // 日期只取本份草稿；未补全时不推算起止日期。
 const dateLabel = computed(() => {
@@ -24,7 +25,7 @@ function jumpToDay(day: number): void {
   cardElement.value?.querySelector<HTMLElement>(`[data-day="${day}"]`)?.scrollIntoView({ block: 'start', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth' })
 }
 
-const emit = defineEmits<{ undo: []; query: [question: string] }>()
+const emit = defineEmits<{ undo: []; query: [question: string]; openFile: [id: string] }>()
 const transportLabels = { walk: '步行', transit: '公共交通', taxi: '打车' }
 const costLabels: Record<string, string> = { accommodation: '住宿', meals: '餐饮', intercity_transport: '城际交通', local_transport: '市内交通', tickets_and_activities: '门票与活动' }
 const operationLabels = { create: '初次安排', modify: '已调整', undo: '已恢复上一版' }
@@ -61,7 +62,12 @@ function money(value: string): string {
 </script>
 
 <template>
-  <article ref="cardElement" class="itinerary-card" aria-label="逐日行程草稿">
+  <article v-if="compact" class="plan-summary" aria-label="行程概览">
+    <header class="summary-head"><span class="plan-symbol"><ChatIcon name="file" /></span><div><h3>{{ snapshot.plan.title }}</h3><p>{{ snapshot.plan.days.length }} 天 {{ snapshot.plan.budget.nights }} 晚 · {{ snapshot.plan.budget.travelers }} 人出游 · {{ dateLabel }}</p></div><span class="draft-pill">草稿 v{{ snapshot.version }}</span></header>
+    <ol class="summary-days"><li v-for="day in snapshot.plan.days" :key="day.day"><span class="day-number">DAY<b>{{ String(day.day).padStart(2, '0') }}</b></span><div><h4>{{ day.date || `${snapshot.plan.destination} · 第${day.day}天` }}</h4><p class="summary-route"><template v-for="(activity, index) in day.activities" :key="activity.place.id"><ChatIcon v-if="index" name="chevron" /><span>{{ activity.place.map.matched_name || activity.place.map.name }}</span></template><span v-if="!day.activities.length">当日安排待补充</span></p></div></li></ol>
+    <footer class="summary-bottom"><span>已保存至本对话文件</span><div><button v-if="undoAvailable" :disabled="busy" @click="emit('undo')">撤销本次修改</button><button @click="emit('openFile', snapshot.itinerary_id)">打开行程草稿<ChatIcon name="chevron" /></button></div></footer>
+  </article>
+  <article v-else ref="cardElement" class="itinerary-card" aria-label="逐日行程草稿">
     <header class="plan-header">
       <div class="header-top"><h3 class="journey"><span>{{ origin || '出发地待定' }}</span><span class="route-arrow" aria-label="前往">→</span><span>{{ snapshot.plan.destination }}</span></h3><span class="version">草稿 v{{ snapshot.version }}<small>{{ operationLabels[snapshot.operation] }}</small></span></div>
       <div class="trip-facts"><span>{{ snapshot.plan.days.length }} 天 · {{ snapshot.plan.budget.nights }} 晚</span><span>{{ snapshot.plan.budget.travelers }} 人同行</span><span class="trip-date">{{ dateLabel }}</span></div>
@@ -113,3 +119,6 @@ function money(value: string): string {
 </template>
 
 <style scoped src="./itinerary.css"></style>
+<style scoped>
+.plan-summary{border:1px solid #dde7df;border-radius:12px;overflow:hidden;margin:20px 0 17px;background:#fff;box-shadow:0 3px 12px #284b3805;color:#36523b}.summary-head{padding:19px 20px 15px;background:#f8faf6;border-bottom:1px solid #e8eee5;display:flex;align-items:flex-start;gap:11px}.summary-head>div{min-width:0}.summary-head h3{font-size:16px;margin:0 0 6px;font-weight:600;overflow-wrap:anywhere}.summary-head p{font-size:11px;color:#8b9888;margin:0;line-height:1.8}.plan-symbol{display:grid;place-items:center;width:34px;height:38px;flex-shrink:0;border:1px solid #dfe8d9;border-radius:8px;background:#eaf2e4;color:#7c996b}.draft-pill{margin-left:auto;font-size:10px;white-space:nowrap;border:1px solid #e2eadd;border-radius:4px;padding:3px 6px;color:#829778}.summary-days{padding:7px 20px;margin:0;list-style:none}.summary-days>li{display:flex;gap:15px;padding:18px 0;border-bottom:1px solid #eef1e9}.summary-days>li:last-child{border:0}.summary-days>li>div{min-width:0}.day-number{width:28px;flex-shrink:0;font-size:10px;color:#95a58e;padding-top:2px}.day-number b{display:block;font-family:Georgia,serif;font-size:20px;color:#547549;font-weight:400;line-height:1.2}.summary-days h4{font-size:13px;font-weight:550;margin:0 0 8px}.summary-route{display:flex;align-items:center;flex-wrap:wrap;gap:7px;font-size:12px;color:#7f8f79;margin:0;line-height:1.7}.summary-route .chat-icon{width:12px;height:12px;transform:rotate(-90deg)}.summary-bottom{border-top:1px solid #e8eee5;padding:11px 18px;display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:10px;color:#8a9988}.summary-bottom>div{display:flex;gap:12px}.summary-bottom button{display:flex;align-items:center;gap:6px;border:0;background:none;color:#50816f;font:inherit;cursor:pointer}.summary-bottom .chat-icon{width:13px;height:13px;transform:rotate(-90deg)}@media(max-width:600px){.summary-head{padding:15px 13px}.summary-head h3{font-size:14px}.summary-head p{font-size:10px}.summary-days{padding-inline:13px}.summary-days>li{gap:10px}.summary-bottom{padding:10px 13px;flex-wrap:wrap}.draft-pill{font-size:9px}}
+</style>

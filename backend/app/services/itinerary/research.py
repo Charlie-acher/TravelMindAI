@@ -22,7 +22,7 @@ from pydantic import BaseModel, Field
 
 from app.llm.budget import ensure_input_budget
 from app.llm.client import ModelOutputError
-from app.services.chat.events import progress, research_tasks
+from app.services.chat.events import research_tasks, tool_progress
 from app.services.itinerary.tools import PlanTools
 
 logger = logging.getLogger(__name__)
@@ -45,7 +45,6 @@ def run_research(task: str, parent: PlanTools, model: BaseChatModel,
     tools.knowledge_chunks, tools.calls = dict(parent.knowledge_chunks), parent.calls
     initial_calls = tools.calls
     result: dict[str, Any] | None = None
-    progress("research_start", "主规划助手正在请研究助手核对资料和地点")
 
     """研究返回函数：只接受工具已核实的地点编号，不允许模型凭空提交事实。"""
 
@@ -103,26 +102,30 @@ def run_research(task: str, parent: PlanTools, model: BaseChatModel,
         finish, ModelCallLimitMiddleware(run_limit=5), choose]
     agent = create_agent(model, tools=actions, system_prompt=SYSTEM,
         middleware=middleware, checkpointer=False)
-    status = "failed"
-    try:
-        agent.invoke({"messages": [{"role": "user", "content": json.dumps({
-            "task": task, "destination": parent.destination,
-            "sources": [source.model_dump(mode="json") for source in tools.sources.values()],
-            "places": [place.model_dump(mode="json") for place in tools.places.values()],
-        }, ensure_ascii=False)}]}, config={"recursion_limit": 35, "max_concurrency": 1},
-            durability="async")
-        status = "completed" if result is not None else "incomplete"
-        parent.sources.update(tools.sources)
-        parent.places.update(tools.places)
-        parent.knowledge_chunks.update(tools.knowledge_chunks)
-        progress("research_done", "研究助手已返回核对结果，主规划助手继续安排行程")
-        return result or {"task_id": task_id, "places": [],
-                          "missing": "研究未完成，请据已有证据判断"}
-    finally:
-        parent.calls = tools.calls
-        record = {"task_id": task_id, "parent_task_id": parent_task_id, "agent": "research",
-                  "status": status, "queries": tools.calls - initial_calls,
-                  "elapsed_seconds": round(perf_counter() - started, 3)}
-        if (trace := research_tasks.get()) is not None:
-            trace.append(record)
-        logger.info("research_task %s", json.dumps(record))
+    # 与普通工具共用开始/结束记录，取消和失败也会保存真实状态。
+    with tool_progress("subagent", "研究助手") as outcome:
+        status = "failed"
+        try:
+            agent.invoke({"messages": [{"role": "user", "content": json.dumps({
+                "task": task, "destination": parent.destination,
+                "sources": [source.model_dump(mode="json") for source in tools.sources.values()],
+                "places": [place.model_dump(mode="json") for place in tools.places.values()],
+            }, ensure_ascii=False)}]}, config={"recursion_limit": 35, "max_concurrency": 1},
+                durability="async")
+            status = "completed" if result is not None else "incomplete"
+            parent.sources.update(tools.sources)
+            parent.places.update(tools.places)
+            parent.knowledge_chunks.update(tools.knowledge_chunks)
+            outcome["status"] = "completed" if result is not None else "failed"
+            outcome["summary"] = ("核对资料和地点后返回主规划助手" if result is not None
+                                  else "研究未完成，交回主规划助手处理")
+            return result or {"task_id": task_id, "places": [],
+                              "missing": "研究未完成，请据已有证据判断"}
+        finally:
+            parent.calls = tools.calls
+            record = {"task_id": task_id, "parent_task_id": parent_task_id, "agent": "research",
+                      "status": status, "queries": tools.calls - initial_calls,
+                      "elapsed_seconds": round(perf_counter() - started, 3)}
+            if (trace := research_tasks.get()) is not None:
+                trace.append(record)
+            logger.info("research_task %s", json.dumps(record))

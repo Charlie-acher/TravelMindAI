@@ -47,5 +47,5 @@ class TurnUnderstanding(BaseModel):
     transport_clear_fields: list[Literal[
         "origin", "destination", "departure_date", "return_date", "travelers",
         "earliest_departure", "latest_arrival", "return_earliest_departure",
-        "return_latest_arrival", "preferences",
+        "return_latest_arrival", "preferences", "previous_day_earliest_departure",
     ]] = Field(default_factory=list)

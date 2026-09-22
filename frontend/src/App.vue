@@ -34,7 +34,9 @@ const registering = ref(false)
 const authDialog = ref<HTMLDialogElement | null>(null)
 const pendingQuestion = ref<string | null>(null)
 const activePage = ref<'chat' | 'documents' | 'usage' | 'space'>('chat')
-const inspector = ref<'status' | 'files' | null>(null)
+const inspector = ref<'files' | null>(null)
+const statusOpen = ref(false)
+watch(activePage, () => { statusOpen.value = false })
 const workspaceBody = ref<HTMLElement | null>(null)
 const inspectorWidth = ref(360)
 const workspaceWidth = ref(window.innerWidth)
@@ -44,6 +46,15 @@ const historySearchOpen = ref(false)
 const historySearchInput = ref<HTMLInputElement | null>(null)
 const panelButton = ref<HTMLButtonElement | null>(null)
 const inspectorElement = ref<HTMLElement | null>(null)
+const sessionFiles = ref<InstanceType<typeof PersonalFilesPanel> | null>(null)
+/** 草稿打开函数：先展开文件栏，再按聊天卡片的历史版本读取完整文件。 */
+async function openItinerary(id: string): Promise<void> {
+  inspectorTrigger = document.activeElement as HTMLElement | null
+  inspector.value = 'files'
+  await nextTick()
+  if (narrowInspector.value) inspectorElement.value?.focus()
+  await sessionFiles.value?.openItinerary(id)
+}
 const narrowInspector = computed(() => workspaceWidth.value < 900)
 const maxInspectorWidth = computed(() => Math.min(760, Math.max(300, workspaceWidth.value - 447)))
 const displayedInspectorWidth = computed(() => Math.min(inspectorWidth.value, maxInspectorWidth.value))
@@ -75,7 +86,7 @@ function resizeWithKeyboard(event: KeyboardEvent): void {
   const widths: Record<string, number> = { ArrowLeft: displayedInspectorWidth.value + step, ArrowRight: displayedInspectorWidth.value - step, Home: 300, End: maxInspectorWidth.value }
   if (event.key in widths) { event.preventDefault(); setInspectorWidth(widths[event.key]!) }
 }
-async function toggleInspector(tab: 'status' | 'files'): Promise<void> {
+async function toggleInspector(tab: 'files'): Promise<void> {
   inspectorTrigger = document.activeElement as HTMLElement | null
   inspector.value = inspector.value === tab ? null : tab
   if (inspector.value && narrowInspector.value) { await nextTick(); inspectorElement.value?.focus() }
@@ -160,7 +171,7 @@ watch([busy, uploading], ([working, loading], [wasWorking, wasLoading]) => {
 })
 
 /** 历史操作只定位菜单，不读取或发送对话。 */
-async function showSessionMenu(item: SessionSummary, event: MouseEvent): Promise<void> {
+async function showSessionMenu(item: SessionSummary, event: Event): Promise<void> {
   if (busy.value || renamingId.value || deletingId.value) return
   menuItem.value = item
   const rect = (event.currentTarget as HTMLElement).getBoundingClientRect()
@@ -203,7 +214,8 @@ function onShortcut(event: KeyboardEvent): void {
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k' && account.value && !renameDialog.value?.open) {
     event.preventDefault(); void newConversation()
   }
-  if (event.key === 'Escape') { mobileOpen.value = false; if (inspector.value) closeInspector() }
+  // 状态浮层由浏览器先关闭，不能同时关掉下层的文件面板。
+  if (event.key === 'Escape' && !statusOpen.value) { mobileOpen.value = false; if (inspector.value) closeInspector() }
 }
 
 /** 退出或401同步清除私人界面；代数防止旧异步请求回写。 */
@@ -213,7 +225,7 @@ function clearPrivate(): void {
   deleteDialog?.close(); deleteDialog = null; deletingId.value = null
   sessionMenu.value?.hidePopover(); renameDialog.value?.close(); renameTarget.value = null; renamingId.value = null
   menuItem.value = null; search.value = ''; mobileOpen.value = false
-  inspector.value = null; refreshKey.value = 0
+  inspector.value = null; statusOpen.value = false; refreshKey.value = 0
   account.value = null; activePage.value = 'chat'; documentsOpened.value = false; sessions.value = []; nextCursor.value = null
   listError.value = ''; listBusy.value = false
   modelState.value = 'checking'; clearConversation()
@@ -465,29 +477,29 @@ onBeforeUnmount(() => { workspaceObserver?.disconnect(); clearTimeout(searchTime
     <button v-if="mobileOpen" class="sidebar-scrim" aria-label="关闭侧栏" @click="mobileOpen = false" />
     <aside class="sidebar" aria-label="对话导航">
       <div class="sidebar-brand">
-        <button class="brand" aria-label="TravelMindAI 新对话" :disabled="busy || !!deletingId || !!renamingId" @click="newConversation"><img src="/brand/logo-mark.svg" alt="" /><span>TravelMind<em>AI</em></span></button>
+        <button class="brand" aria-label="TravelMind 新对话" :disabled="busy || !!deletingId || !!renamingId" @click="newConversation"><img src="/brand/logo-mark.svg" alt="" /><span>Travel<em>Mind</em></span></button>
         <button class="icon-button collapse" aria-label="收起侧栏" @click="collapsed = true; mobileOpen = false"><ChatIcon name="panel" /></button>
       </div>
       <div class="sidebar-actions">
-        <button class="new-chat" :disabled="busy || !!deletingId || !!renamingId" @click="newConversation"><ChatIcon name="plus" /><span>新建对话</span><kbd>Ctrl K</kbd></button>
+        <button class="new-chat" :disabled="busy || !!deletingId || !!renamingId" @click="newConversation"><ChatIcon name="new" /><span>新建对话</span><kbd>Ctrl K</kbd></button>
         <button class="workspace-nav" :class="{ selected: activePage === 'space' }" @click="activePage = 'space'; mobileOpen = false"><ChatIcon name="drive" /><span>个人空间</span></button>
         <button v-if="account.role === 'admin'" class="workspace-nav" :class="{ selected: activePage === 'documents' }" @click="documentsOpened = true; activePage = 'documents'; mobileOpen = false"><ChatIcon name="books" /><span>知识库</span><span class="admin-tag">管理</span></button>
       </div>
-      <div class="history-heading"><span>最近</span><button class="icon-button" aria-label="搜索最近对话" title="搜索最近对话" :aria-expanded="historySearchOpen" @click="historySearchOpen = !historySearchOpen; nextTick(() => historySearchInput?.focus())"><ChatIcon name="search" /></button></div>
+      <div class="history-heading"><span>最近<ChatIcon name="chevron" /></span><button class="icon-button" aria-label="搜索最近对话" title="搜索最近对话" :aria-expanded="historySearchOpen" @click="historySearchOpen = !historySearchOpen; nextTick(() => historySearchInput?.focus())"><ChatIcon name="search" /></button></div>
       <label v-if="historySearchOpen || search" class="search"><ChatIcon name="search" /><input ref="historySearchInput" v-model="search" type="search" maxlength="200" placeholder="搜索全部对话" aria-label="搜索全部历史对话" /></label>
       <nav class="history-list" aria-label="最近对话">
         <a-alert v-if="listError" type="error" class="history-error">{{ listError }}<a-button size="mini" @click="loadSessions()">重试加载</a-button></a-alert>
         <p v-if="listBusy && !sessions.length" class="empty-history" role="status">正在读取历史…</p>
         <p v-else-if="!sessions.length" class="empty-history">{{ search ? '没有匹配的对话。' : '下一段旅程，从新对话开始。' }}</p>
-          <div v-for="item in sessions" :key="item.id" class="history-row" :class="{ selected: activePage === 'chat' && sessionId === item.id }">
-            <button class="history-select" :title="item.title" :aria-current="sessionId === item.id && activePage === 'chat' ? 'page' : undefined" :disabled="busy || !!deletingId || !!renamingId" @click="chooseSession(item.id)"><ChatIcon name="chat" /><span>{{ item.title || '新建对话' }}</span></button>
-            <button class="icon-button row-more" :aria-label="`${item.title || '新建对话'}：更多操作`" aria-haspopup="menu" :disabled="busy || !!deletingId || !!renamingId" @click="showSessionMenu(item, $event)"><ChatIcon name="more" /></button>
+          <div v-for="item in sessions" :key="item.id" class="history-row" @contextmenu.prevent="showSessionMenu(item, $event)" @keydown.shift.f10.prevent="showSessionMenu(item, $event)" :class="{ selected: activePage === 'chat' && sessionId === item.id }">
+            <button class="history-select" :title="item.title" :aria-current="sessionId === item.id && activePage === 'chat' ? 'page' : undefined" :disabled="busy || !!deletingId || !!renamingId" @click="chooseSession(item.id)"><span>{{ item.title || '新建对话' }}</span></button>
+            <button class="icon-button row-more" :aria-label="`${item.title || '新建对话'}：重命名`" title="重命名；右键查看更多操作" :disabled="busy || !!deletingId || !!renamingId" @click="openRename(item)"><ChatIcon name="edit" /></button>
           </div>
         <button v-if="nextCursor" class="load-more" :disabled="listBusy || !!deletingId || !!renamingId" @click="loadSessions(true)">{{ listBusy ? '正在加载…' : '加载更早对话' }}</button>
       </nav>
       <div class="sidebar-bottom">
         <details class="profile">
-          <summary class="account" :aria-label="`${account.username}的账号菜单`"><span class="avatar">{{ account.username.slice(0, 1).toUpperCase() }}</span><span class="account-label"><strong>{{ account.username }}</strong><small>{{ account.role === 'admin' ? '管理员账号' : '个人账号' }}</small></span><ChatIcon name="chevron" /></summary>
+          <summary class="account" :aria-label="`${account.username}的账号菜单`"><span class="avatar">{{ account.username.slice(0, 1).toUpperCase() }}</span><span class="account-label"><strong>{{ account.username }}</strong><small>{{ account.role === 'admin' ? '管理员账号' : '个人账号' }}</small></span><ChatIcon name="more" /></summary>
           <div class="profile-menu"><strong>{{ account.username }}</strong><small>{{ account.role === 'admin' ? '管理员 · 共享知识库管理' : '个人账号 · 私人旅行对话' }}</small><button v-if="account.role === 'admin'" @click="activePage = 'usage'; mobileOpen = false; ($event.currentTarget as HTMLElement).closest('details')?.removeAttribute('open')"><ChatIcon name="chart" />调用费用</button><button :disabled="busy || authBusy || !!deletingId || !!renamingId" @click="signOut"><ChatIcon name="logout" />退出登录</button></div>
         </details>
       </div>
@@ -496,7 +508,7 @@ onBeforeUnmount(() => { workspaceObserver?.disconnect(); clearTimeout(searchTime
       <header class="topbar"><div class="topbar-left"><button class="icon-button expand" aria-label="展开侧栏" title="展开侧栏" @click="collapsed = false; mobileOpen = true"><ChatIcon name="panel" /></button><span class="conversation-title">{{ activePage === 'documents' ? '知识库' : activePage === 'usage' ? '调用费用' : activePage === 'space' ? '个人空间' : currentTitle }}</span></div>
         <div v-if="activePage === 'chat' && modelState !== 'configured'" class="service-state" role="status"><span>{{ modelState === 'checking' ? '正在连接…' : '服务暂不可用' }}</span><button v-if="modelState !== 'checking'" @click="checkModel">重新检查</button></div>
         <button v-if="activePage !== 'chat'" class="back-chat" @click="activePage = 'chat'">返回对话 ↗</button>
-        <div v-else class="inspector-actions"><button ref="panelButton" class="top-tab" :class="{ active: inspector === 'status' }" :aria-expanded="inspector === 'status'" aria-controls="workspace-inspector" @click="toggleInspector('status')"><ChatIcon name="status" />状态</button><button class="top-tab" :class="{ active: inspector === 'files' }" :aria-expanded="inspector === 'files'" aria-controls="workspace-inspector" @click="toggleInspector('files')"><ChatIcon name="folder" />文件</button></div>
+        <div v-else class="inspector-actions"><button class="top-tab" :class="{ active: statusOpen }" :aria-expanded="statusOpen" aria-controls="workspace-status" popovertarget="workspace-status"><ChatIcon name="status" />状态</button><button ref="panelButton" class="top-tab" :class="{ active: inspector === 'files' }" :aria-expanded="inspector === 'files'" aria-controls="workspace-inspector" @click="toggleInspector('files')"><ChatIcon name="folder" />文件</button></div>
       </header>
       <a-alert v-if="authError" type="error">{{ authError }}</a-alert>
       <div ref="workspaceBody" class="workspace-body" :class="{ 'is-resizing': resizing, 'inspector-open': activePage === 'chat' && inspector, 'inspector-overlay': narrowInspector }" :style="{ '--inspector-width': `${displayedInspectorWidth}px` }">
@@ -509,7 +521,7 @@ onBeforeUnmount(() => { workspaceObserver?.disconnect(); clearTimeout(searchTime
             <div v-if="message.role === 'assistant'" class="message-bubble markdown-answer" v-html="renderMarkdown(message.text)" /><div v-else-if="message.text" class="message-bubble">{{ message.text }}</div><AttractionCards v-if="message.role === 'assistant' && message.attractions?.length" :items="message.attractions" />
             <p v-if="message.attractions?.length && message.knowledge?.clarification && !message.text.includes(message.knowledge.clarification)" class="answer-followup">{{ message.knowledge.clarification }}</p>
             <RestaurantCards v-if="message.role === 'assistant' && message.restaurants?.length" :items="message.restaurants" :category="message.nearby?.category" :provider="message.nearby?.provider" />
-            <ItineraryCard v-if="message.role === 'assistant' && message.itinerary" :snapshot="message.itinerary" :origin="message.origin" :undo-available="message.messageId === undoTarget && !pendingUndo" :busy="busy || restoreFailed || checkingAuth || !!deletingId || !!renamingId" @undo="undo(message.messageId!)" @query="input = $event" />
+            <ItineraryCard v-if="message.role === 'assistant' && message.itinerary" :snapshot="message.itinerary" compact @open-file="openItinerary" :origin="message.origin" :undo-available="message.messageId === undoTarget && !pendingUndo" :busy="busy || restoreFailed || checkingAuth || !!deletingId || !!renamingId" @undo="undo(message.messageId!)" @query="input = $event" />
             <section v-if="message.role === 'assistant' && message.workflow?.preview" class="workflow-preview" aria-label="候选行程">
               <details><summary>待采用的候选行程</summary>
                 <div v-for="day in message.workflow.preview.days" :key="day.day"><strong>第{{ day.day }}天</strong><ul><li v-for="activity in day.activities" :key="activity.place.id">{{ activity.start_time }} · {{ activity.place.map.name }} · {{ activity.duration_minutes }}分钟</li></ul></div>
@@ -552,13 +564,16 @@ onBeforeUnmount(() => { workspaceObserver?.disconnect(); clearTimeout(searchTime
           <p v-if="!emptyChat" class="composer-note">AI 生成内容仅供参考，请核实出行信息。</p>
         </div>
       </section>
+      <div v-if="activePage === 'chat'" id="workspace-status" popover class="status-popover" role="dialog" aria-label="当前会话状态" @toggle="statusOpen = ($event as ToggleEvent).newState === 'open'">
+        <div class="inspector-heading"><span><ChatIcon name="status" />上下文与 Token</span><span><button class="icon-button" aria-label="刷新当前会话状态" :disabled="!sessionId" @click="refreshKey++"><ChatIcon name="refresh" /></button><button class="icon-button" aria-label="关闭会话状态" popovertarget="workspace-status" popovertargetaction="hide"><ChatIcon name="close" /></button></span></div>
+        <WorkspaceStatus v-if="statusOpen" :key="`${account.id}:${sessionId}`" :session-id="sessionId" :refresh-key="refreshKey" />
+      </div>
       <template v-if="activePage === 'chat' && inspector">
         <button v-if="narrowInspector" class="inspector-scrim" aria-label="关闭右侧面板" @click="closeInspector" />
         <div v-else class="workspace-divider" role="separator" aria-orientation="vertical" aria-label="调整聊天与右侧面板宽度" aria-controls="workspace-inspector" :aria-valuemin="300" :aria-valuemax="maxInspectorWidth" :aria-valuenow="displayedInspectorWidth" :aria-valuetext="`右侧面板 ${displayedInspectorWidth} 像素`" tabindex="0" title="拖动调整宽度 · 双击恢复默认 · 方向键微调" @pointerdown="startResize" @pointermove="moveResize" @pointerup="endResize" @pointercancel="endResize" @lostpointercapture="endResize" @keydown="resizeWithKeyboard" @dblclick="setInspectorWidth(360)" />
-        <aside id="workspace-inspector" ref="inspectorElement" class="workspace-inspector" :role="narrowInspector ? 'dialog' : 'complementary'" :aria-modal="narrowInspector ? true : undefined" :aria-label="inspector === 'status' ? '当前会话状态' : '当前会话文件'" tabindex="-1" @keydown="onInspectorKeydown">
-          <div class="inspector-heading"><span><ChatIcon :name="inspector === 'status' ? 'status' : 'folder'" />{{ inspector === 'status' ? '会话状态' : '对话文件' }}</span><span><button class="icon-button" :aria-label="inspector === 'status' ? '刷新当前会话状态' : '刷新当前会话文件'" title="刷新" :disabled="!sessionId" @click="refreshKey++"><ChatIcon name="refresh" /></button><button class="icon-button" aria-label="关闭右侧面板" title="关闭面板" @click="closeInspector"><ChatIcon name="close" /></button></span></div>
-          <WorkspaceStatus v-if="inspector === 'status'" :key="`${account.id}:${sessionId}`" :session-id="sessionId" :refresh-key="refreshKey" />
-          <PersonalFilesPanel v-else-if="sessionId" :key="`${account.id}:${sessionId}`" :session-id="sessionId" :refresh-key="refreshKey" @open-session="chooseSession" />
+        <aside id="workspace-inspector" ref="inspectorElement" class="workspace-inspector" :role="narrowInspector ? 'dialog' : 'complementary'" :aria-modal="narrowInspector ? true : undefined" aria-label="当前会话文件" tabindex="-1" @keydown="onInspectorKeydown">
+          <div class="inspector-heading"><span><ChatIcon name="folder" />对话文件</span><span><button class="icon-button" aria-label="刷新当前会话文件" title="刷新" :disabled="!sessionId" @click="refreshKey++"><ChatIcon name="refresh" /></button><button class="icon-button" aria-label="关闭右侧面板" title="关闭面板" @click="closeInspector"><ChatIcon name="close" /></button></span></div>
+          <PersonalFilesPanel ref="sessionFiles" v-if="sessionId" :key="`${account.id}:${sessionId}`" :session-id="sessionId" :refresh-key="refreshKey" @open-session="chooseSession" />
           <div v-else class="inspector-empty"><ChatIcon name="folder" /><p>还没有对话文件</p><small>添加附件或生成行程后会显示在这里。</small></div>
         </aside>
       </template>

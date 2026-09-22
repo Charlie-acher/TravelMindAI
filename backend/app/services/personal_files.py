@@ -262,10 +262,25 @@ def itinerary_markdown(detail: PersonalFileDetail) -> bytes:
                 f"- {activity.start_time} {activity.place.map.name}，"
                 f"游览{activity.duration_minutes}分钟，交通预留{activity.transfer_minutes}分钟"
             )
+            transport = {"walk": "步行", "transit": "公共交通", "taxi": "打车"}
+            lines.append(f"  - 交通方式：{transport[activity.transport]}")
+            location = activity.place.map
+            if location.address:
+                lines.append(f"  - 地址：{location.address}")
+            if location.location:
+                lines.append(f"  - 百度坐标（BD-09）：{location.location.longitude}，"
+                             f"{location.location.latitude}")
+            if route := activity.route:
+                duration = (f"{route.duration_minutes}分钟"
+                            if route.duration_minutes is not None else "耗时未取得")
+                distance = f"{route.distance_m}米" if route.distance_m is not None else "距离未取得"
+                lines.append(f"  - 地图路线：{duration}，{distance}；百度查询于"
+                             f"{route.checked_at.isoformat()}（查询时估计，不保证出行日耗时）")
             for source in activity.place.sources:
                 lines.append(
                     f"  - 来源：{source.title}" + (f" — {source.url}" if source.url else "")
                 )
+                lines.extend(f"    > {line}" for line in source.text.splitlines())
         lines.append("")
     lines.extend(
         [
@@ -276,6 +291,21 @@ def itinerary_markdown(detail: PersonalFileDetail) -> bytes:
             "",
         ]
     )
+    labels = {"accommodation": "住宿", "meals": "餐饮", "intercity_transport": "城际交通",
+              "local_transport": "市内交通", "tickets_and_activities": "门票与活动"}
+    lines.extend(["### 预算明细", "", *[
+        f"- {labels.get(key, key)}：{amount}元" for key, amount in plan.budget.costs.items()],
+        f"- 预备金：{plan.budget.contingency}元", f"- 预算余额：{plan.budget.remaining}元", ""])
+    if plan.ticket_prices:
+        lines.extend(["## 门票公开价格", "",
+                      "公布价未计入上述演示预算，不代表出行日库存或成交价格。", ""])
+        for price in plan.ticket_prices:
+            value = (f"{price.amount}元 {price.unit}"
+                     if price.status == "published" and price.amount is not None else "待查询")
+            lines.extend([f"### {price.place} · {value}", price.conditions, price.evidence,
+                f"来源：{price.source_title or '未取得'} {price.source_url or ''}",
+                f"查询于：{price.checked_at.isoformat()}",
+                f"适用日期：{price.valid_from or '待核实'} 至 {price.valid_until or '待核实'}", ""])
     for label, values in (
         ("饮食偏好", request.dietary),
         ("住宿偏好", request.lodging_preferences),

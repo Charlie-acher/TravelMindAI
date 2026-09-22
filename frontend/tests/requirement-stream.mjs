@@ -513,7 +513,7 @@ try {
   pageItinerary.queryRoute(snapshot.plan.days[0])
   assert.match(pageState.input, /杭州.*第1天.*西湖.*怎么走.*耗时/)
   assert.equal(queryRequests, 0, '行程查询事件只填输入区，不自动发送')
-  assert.ok(historyHtml.includes('待删除历史：更多操作'), '历史操作集中在三点菜单')
+  assert.ok(historyHtml.includes('待删除历史：重命名'), '设计稿铅笔直接改名，其他操作保留在右键菜单')
   assert.ok(historyHtml.includes('这是餐馆总体建议。'), '带卡片的最终正文仍需单独渲染')
   assert.ok(historyHtml.includes('测试餐馆'), '最终正文之后继续渲染结构化卡片')
   assert.ok(historyHtml.indexOf('这是餐馆总体建议。') < historyHtml.indexOf('测试餐馆'))

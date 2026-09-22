@@ -45,9 +45,9 @@ async function load(start = 0): Promise<void> {
 }
 
 /** 详情加载函数：打开原生对话框，版本切换仍重新查询服务器的归属检查。 */
-async function openDetail(item: PersonalFileItem, showExpanded = !props.sessionId): Promise<void> {
+async function openDetail(item: Pick<PersonalFileItem, 'id' | 'kind'>, showExpanded = !props.sessionId): Promise<void> {
   const request = ++detailRequest
-  selectedItem.value = item
+  selectedItem.value = null
   expanded.value = showExpanded
   detail.value = null
   detailLoading.value = true
@@ -57,7 +57,7 @@ async function openDetail(item: PersonalFileItem, showExpanded = !props.sessionI
   if (showExpanded && !dialog.value?.open) dialog.value?.showModal()
   try {
     const result = await getPersonalFile(item)
-    if (request === detailRequest) detail.value = result
+    if (request === detailRequest) { detail.value = result; selectedItem.value = result.item }
   } catch (cause) {
     if (request === detailRequest) detailError.value = cause instanceof Error ? cause.message : '文件详情加载失败'
   } finally {
@@ -116,6 +116,8 @@ watch(() => [props.sessionId, props.refreshKey], () => {
   void load()
 }, { immediate: true })
 onBeforeUnmount(() => { listRequest++; closeDetail() })
+// 聊天卡片按保存的版本编号打开，不依赖列表顺序或当前最新版本。
+defineExpose({ openItinerary: (id: string) => openDetail({ id, kind: 'itinerary' }) })
 </script>
 
 <template>
@@ -130,7 +132,7 @@ onBeforeUnmount(() => { listRequest++; closeDetail() })
     <div v-else-if="!sessionId" class="file-table-wrap"><table class="file-table"><thead><tr><th>文件名称</th><th>类型</th><th>来源会话</th><th>保存时间</th><th>操作</th></tr></thead><tbody><tr v-for="item in items" :key="`${item.kind}:${item.id}`"><td><button class="file-main" @click="openDetail(item)"><span class="file-badge"><ChatIcon :name="item.kind === 'itinerary' ? 'map' : 'file'" /></span><span class="file-name"><strong>{{ item.file_name }}</strong><small>{{ sizeLabel(item) }}<template v-if="item.version_count"> · {{ item.version_count }} 个版本</template></small></span></button></td><td><span class="type-pill" :class="{ itinerary: item.kind === 'itinerary' }">{{ item.kind === 'itinerary' ? '行程' : '附件' }}</span></td><td><button class="file-source" :title="item.session_title" @click="openSource(item.session_id)">{{ item.session_title }} ↗</button></td><td class="file-time">{{ dateLabel(item.created_at) }}</td><td><div class="table-actions"><button class="file-button" @click="openDetail(item)">预览</button><a :href="personalFileDownloadUrl(item)" :aria-label="`下载 ${item.file_name}`"><ChatIcon name="download" /></a></div></td></tr></tbody></table></div>
     <ul v-else class="file-list"><li v-for="item in items" :key="`${item.kind}:${item.id}`" class="file-row" :class="{ selected: selectedItem?.id === item.id }"><button class="file-main" @click="openDetail(item)"><span class="file-badge"><ChatIcon :name="item.kind === 'itinerary' ? 'map' : 'file'" /></span><span class="file-name"><strong>{{ item.file_name }}</strong><small>{{ sizeLabel(item) }}<template v-if="item.version_count"> · {{ item.version_count }} 个版本</template></small></span></button><div class="file-actions"><span class="file-time">{{ dateLabel(item.created_at) }}</span><a :href="personalFileDownloadUrl(item)" :aria-label="`下载 ${item.file_name}`"><ChatIcon name="download" />下载</a></div></li></ul>
     <nav v-if="total > limit" class="file-pages" aria-label="文件分页"><button class="file-button" :disabled="loading || offset === 0" @click="load(Math.max(0, offset - limit))">上一页</button><span>{{ Math.floor(offset / limit) + 1 }} / {{ Math.ceil(total / limit) }}</span><button class="file-button" :disabled="loading || offset + limit >= total" @click="load(offset + limit)">下一页</button></nav>
-    <section v-if="sessionId && selectedItem && !expanded" class="inline-file-detail" aria-label="文件预览"><header class="inline-preview-heading"><h3>{{ selectedItem.file_name }}</h3><div><button class="file-icon-button" aria-label="放大文件预览" title="放大预览" @click="expandDetail"><ChatIcon name="expand" /></button><button class="file-icon-button" aria-label="关闭文件预览" @click="closeDetail"><ChatIcon name="close" /></button></div></header><p v-if="detailLoading" role="status">正在读取详情…</p><p v-else-if="detailError" role="alert">{{ detailError }}</p><template v-else-if="detail"><div v-if="detail.versions.length" class="file-versions" aria-label="行程历史版本"><button v-for="version in detail.versions" :key="version.id" class="file-button" :class="{ selected: version.id === detail.item.id }" :aria-pressed="version.id === detail.item.id" @click="openDetail(version, false)">v{{ version.version }}</button></div><PersonalFilePreview :detail="detail" /></template></section>
+    <section v-if="sessionId && (selectedItem || detailLoading || detailError) && !expanded" class="inline-file-detail" aria-label="文件预览"><header class="inline-preview-heading"><h3>{{ selectedItem?.file_name || '行程草稿' }}</h3><div><button class="file-icon-button" aria-label="放大文件预览" title="放大预览" :disabled="detailLoading || !selectedItem" @click="expandDetail"><ChatIcon name="expand" /></button><button class="file-icon-button" aria-label="关闭文件预览" @click="closeDetail"><ChatIcon name="close" /></button></div></header><p v-if="detailLoading" role="status">正在读取详情…</p><p v-else-if="detailError" role="alert">{{ detailError }}</p><template v-else-if="detail"><div v-if="detail.versions.length" class="file-versions" aria-label="行程历史版本"><button v-for="version in detail.versions" :key="version.id" class="file-button" :class="{ selected: version.id === detail.item.id }" :aria-pressed="version.id === detail.item.id" @click="openDetail(version, false)">v{{ version.version }}</button></div><PersonalFilePreview :detail="detail" /></template></section>
     <dialog ref="dialog" class="file-dialog" aria-labelledby="file-detail-title" @cancel.prevent="collapseDetail()"><header class="file-detail-header"><h2 id="file-detail-title">{{ selectedItem?.file_name || '文件详情' }}</h2><button class="file-button" aria-label="关闭文件详情" @click="collapseDetail()">{{ sessionId ? '收起' : '关闭' }}</button></header><p v-if="detailLoading" role="status">正在读取详情…</p><p v-else-if="detailError" role="alert">{{ detailError }}</p><template v-else-if="detail && expanded"><div class="detail-meta"><button class="file-source" @click="openSource(detail.item.session_id)">来源：{{ detail.item.session_title }}</button><span>{{ dateLabel(detail.item.created_at) }}</span><a :href="personalFileDownloadUrl(detail.item)"><ChatIcon name="download" />下载{{ detail.itinerary ? ' Markdown' : '原件' }}</a></div><div v-if="detail.versions.length" class="file-versions" aria-label="行程历史版本"><button v-for="version in detail.versions" :key="version.id" class="file-button" :class="{ selected: version.id === detail.item.id }" :aria-pressed="version.id === detail.item.id" @click="openDetail(version, true)">版本 {{ version.version }}</button></div><PersonalFilePreview :detail="detail" /></template></dialog>
   </section>
 </template>

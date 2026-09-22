@@ -3,6 +3,7 @@
 from datetime import date
 
 import httpx
+import pytest
 
 from app.schemas.document.answer import WebSearchResult
 from app.schemas.transport import TransportQuery
@@ -184,6 +185,46 @@ def test_transport_patch_retains_unmentioned_time_and_explicit_clear():
     assert merged.preferences == "少走路"
     assert merge_transport(update, old, ["return_latest_arrival"]).return_latest_arrival is None
     assert old.return_earliest_departure.hour == 7
+
+
+"""提前出发测试函数：前夜无车仍查原日期，夜间限制不传给原日期和返程。"""
+
+@pytest.mark.parametrize("evening_state", ["empty", "found", "unavailable"])
+def test_previous_evening_keeps_original_day_and_return(evening_state):
+    seen = []
+
+    def handle(request):
+        if request.url.path.endswith("/queryG"):
+            day = request.url.params["leftTicketDTO.train_date"]
+            seen.append(day)
+            if day == "2026-09-23" and evening_state == "unavailable":
+                return httpx.Response(503)
+            rows = [train("G2", "09:00", "14:30")]
+            if day == "2026-09-23" and evening_state == "found":
+                rows.append(train("G3", "20:00", "01:30"))
+            return httpx.Response(200, json={"status": True, "data": {
+                "result": rows,
+                "map": {"YIJ": "银川", "ZAF": "郑州东"}}})
+        return transport(request)
+
+    query = TransportQuery(origin="银川", destination="郑州", departure_date="2026-09-24",
+        return_date="2026-09-27", modes=["rail"], previous_day_earliest_departure="19:00",
+        latest_arrival="18:00")
+    with httpx.Client(transport=httpx.MockTransport(handle)) as http:
+        result = query_transport(query, None, RailClient(http), today=date(2026, 9, 22))
+    assert seen == ["2026-09-23", "2026-09-24", "2026-09-27"]
+    assert result.legs[0].rail.status == evening_state
+    if evening_state == "found":
+        assert result.legs[0].rail.options[0].arrival.date() == date(2026, 9, 24)
+    assert result.legs[1].rail.options[0].code == "G2"
+    assert result.legs[2].rail.options[0].code == "G2"
+    text = render_rail(result)
+    assert text.count("19:00及以后出发") == 1
+    assert "原出发日" in text
+    merged = merge_transport(TransportQuery(return_earliest_departure="14:00"), query, [])
+    assert merged.previous_day_earliest_departure.hour == 19
+    assert merge_transport(TransportQuery(), merged,
+        ["previous_day_earliest_departure"]).previous_day_earliest_departure is None
 
 
 """停止测试函数：取消后不再请求任何官方接口，也不把停止当成查询失败。"""

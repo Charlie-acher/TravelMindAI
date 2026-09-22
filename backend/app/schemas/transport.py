@@ -20,6 +20,8 @@ class TransportQuery(BaseModel):
     modes: list[Literal["rail", "flight"]] = Field(
         default=["rail", "flight"], min_length=1, max_length=2)
     earliest_departure: time | None = None
+    # 额外查询原出发日前一晚，不替换原日期，也不限制原日期的出发时间。
+    previous_day_earliest_departure: time | None = None
     latest_arrival: time | None = None
     return_earliest_departure: time | None = None
     return_latest_arrival: time | None = None

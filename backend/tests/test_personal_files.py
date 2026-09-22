@@ -1,6 +1,8 @@
 """接口验收层：验证个人文件分页、行程版本和真实登录账号之间的隔离。"""
 
+from datetime import datetime, timezone
 from io import BytesIO
+from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
@@ -10,10 +12,36 @@ from app.api.auth import COOKIE_NAME
 from app.config import Settings
 from app.main import create_app
 from app.models.trip import TravelSession
+from app.schemas.itinerary import PlanSnapshot, RouteEstimate
+from app.schemas.personal_files import PersonalFileDetail, PersonalFileItem
 from app.services.attachment.storage import AttachmentService
 from app.services.auth import AuthService
+from app.services.itinerary.rules import build_plan
+from app.services.personal_files import itinerary_markdown
 from app.services.trip_service import TripService
+from tests.test_itinerary_agent import places, proposal, requirements
 from tests.test_itinerary_history import save_two
+
+"""完整导出测试函数：文件保留细节和证据，不能只导出聊天卡片上的概览。"""
+
+def test_markdown_keeps_full_saved_plan():
+    request = requirements()
+    plan = build_plan(request, [proposal(1, "p1"), proposal(2, "p2")], places(), None, None)
+    activity = plan.days[0].activities[0]
+    activity.place.map.address = "验收地址"
+    activity.place.sources[0].text = "来源的完整正文"
+    activity.route = RouteEstimate(status="estimated", duration_minutes=12, distance_m=800)
+    identifier = uuid4()
+    detail = PersonalFileDetail(item=PersonalFileItem(
+        id=identifier, kind="itinerary", file_name="行程.md", mime_type="text/markdown",
+        size_bytes=None, session_id=uuid4(), session_title="验收",
+        created_at=datetime.now(timezone.utc),
+    ), itinerary=PlanSnapshot(itinerary_id=identifier, version=1, operation="create",
+                             plan=plan, changes=[]), extraction=request)
+    content = itinerary_markdown(detail).decode()
+    assert "验收地址" in content and "来源的完整正文" in content
+    assert "12分钟" in content and "800米" in content
+    assert "预算明细" in content and "预备金" in content
 
 """个人文件环境函数：创建真实账号、不同归属会话和未发送的同名附件。"""
 

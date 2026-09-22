@@ -21,6 +21,54 @@ try {
   ], seconds: 1.7 }) }))
   assert.ok(processHtml.includes('1 次工具调用') && !processHtml.includes('2 次工具调用'))
   assert.ok(processHtml.includes('tool-detail') && processHtml.includes('找到3条资料') && processHtml.includes('0.4 秒'))
+  const groupedHtml = await renderToString(createSSRApp({ render: () => h(ThinkingProcess, { steps: [
+    { stage: 'history', message: '不应逐条展示的准备阶段' },
+    ...Array.from({ length: 5 }, (_, i) => ({ stage: 'knowledge', message: '检索知识库', call_id: `k${i}`, status: 'completed' })),
+    { stage: 'knowledge_read', message: '读取原文', call_id: 'read', status: 'completed' },
+    { stage: 'search', message: '检索网页', call_id: 'web', status: 'failed' },
+    { stage: 'map', message: '查询地点', call_id: 'map', status: 'running' },
+  ] }) }))
+  assert.equal((groupedHtml.match(/class="process-group /g) || []).length, 4, '重复调用合并为四类，原文读取独立于检索')
+  assert.ok(!groupedHtml.includes('不应逐条展示的准备阶段'))
+  assert.ok(groupedHtml.includes('5 次') && groupedHtml.includes('失败') && groupedHtml.includes('未完成'))
+  for (const steps of [
+    [{ stage: 'research_start', message: '研究开始' }, { stage: 'research_done', message: '研究返回' }],
+    [{ stage: 'subagent', message: '研究助手', call_id: 'agent', status: 'completed' }],
+  ]) {
+    const html = await renderToString(createSSRApp({ render: () => h(ThinkingProcess, { steps }) }))
+    assert.ok(html.includes('1 次子智能体调用') && html.includes('研究助手'))
+    assert.ok(!html.includes('1 次工具调用'), '子智能体独立计数，不冒充资料工具')
+  }
+  const { default: ItineraryCard } = await server.ssrLoadModule('/src/components/ItineraryCard.vue')
+  const snapshot = { itinerary_id: 'saved-version', version: 2, operation: 'create', can_undo: false, changes: [],
+    plan: { title: '苏州三日慢游计划', destination: '苏州', days: [{ day: 1, date: null, activities: [
+      { place: { id: 'garden', map: { name: '拙政园', status: 'unavailable' }, sources: [] }, start_time: '09:00', duration_minutes: 90 },
+    ] }], budget: { travelers: 2, nights: 0, costs: {}, assumptions: [], total: '100', total_budget: '3000', remaining: '2900' }, warnings: [] } }
+  const cardHtml = await renderToString(createSSRApp({ render: () => h(ItineraryCard, { snapshot, compact: true, undoAvailable: false, busy: false }) }))
+  assert.ok(cardHtml.includes('苏州三日慢游计划') && cardHtml.includes('拙政园'))
+  assert.ok(cardHtml.includes('打开行程草稿') && !cardHtml.includes('预算明细与假设'), '聊天显示摘要，完整预算留在文件预览')
+  const { default: PersonalFilesPanel } = await server.ssrLoadModule('/src/components/PersonalFilesPanel.vue')
+  let files, exposedFiles
+  const pendingFiles = new Map()
+  globalThis.fetch = async url => String(url).includes('/personal-files?')
+    ? Response.json({ items: [], total: 0 })
+    : new Promise(resolve => pendingFiles.set(String(url).split('/').at(-1), resolve))
+  app = renderer.createApp({ setup() {
+    files = PersonalFilesPanel.setup({ sessionId: 'saved-session', refreshKey: 0 }, { expose(value) { exposedFiles = value }, emit() {} })
+    return () => null
+  } })
+  app.provide(ssrContextKey, {}); app.mount({})
+  const firstFile = exposedFiles.openItinerary('version-1')
+  await nextTick()
+  const secondFile = exposedFiles.openItinerary('version-2')
+  await nextTick()
+  pendingFiles.get('version-2')(Response.json({ item: { id: 'version-2', file_name: '新版.md' }, itinerary: { ...snapshot, version: 2 }, versions: [] }))
+  await secondFile
+  pendingFiles.get('version-1')(Response.json({ item: { id: 'version-1', file_name: '旧版.md' }, itinerary: { ...snapshot, version: 1 }, versions: [] }))
+  await firstFile
+  assert.equal(files.detail.value.item.id, 'version-2', '迟到的旧卡片文件请求不能覆盖新选择')
+  assert.equal(files.selectedItem.value.file_name, '新版.md')
+  app.unmount(); app = null
   const { default: App } = await server.ssrLoadModule('/src/App.vue')
   let ui
   app = renderer.createApp({ setup() { ui = App.setup({}, { expose() {} }); return () => null } })
@@ -36,6 +84,13 @@ try {
   assert.equal(local.get('travelmind.workspace.inspector-width.v1'), '350')
   ui.workspaceWidth.value = 600
   assert.equal(ui.narrowInspector.value, true)
+  ui.inspector.value = 'files'
+  ui.statusOpen.value = true
+  ui.onShortcut({ key: 'Escape' })
+  assert.equal(ui.inspector.value, 'files', 'Escape先交给原生状态浮层，不连带关闭文件')
+  ui.statusOpen.value = false
+  ui.onShortcut({ key: 'Escape' })
+  assert.equal(ui.inspector.value, null, '没有状态浮层时Escape继续关闭文件')
   app.unmount(); app = null
 
   const { useRequirementConversation } = await server.ssrLoadModule('/src/useRequirementConversation.ts')

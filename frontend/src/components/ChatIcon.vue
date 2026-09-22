@@ -2,6 +2,7 @@
 /** 对话图标：复用确认稿的线条图标，按钮的文字标签由调用方提供。 */
 defineProps<{ name: string }>()
 const paths: Record<string, string> = {
+  new: 'M20 11a8 8 0 0 1-8 8H5l-3 2v-7a8 8 0 1 1 18-3ZM12 7v8M8 11h8',
   drive: 'm4 4-2 9v6a1 1 0 0 0 1 1h18a1 1 0 0 0 1-1v-6l-2-9ZM2 13h20M6 17h.01M10 17h.01',
   folder: 'M3 7V4h6l2 3h10v13H3ZM3 7h18',
   status: 'M9 5h12M9 12h12M9 19h12M2 4l2 2 2-3M2 11l2 2 2-3M2 18l2 2 2-3',

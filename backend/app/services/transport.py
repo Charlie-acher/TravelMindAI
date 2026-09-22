@@ -122,8 +122,10 @@ class RailClient:
                     raise ValueError("官方时间字段不一致")
                 if query.earliest_departure and departure.time() < query.earliest_departure:
                     continue
-                if query.latest_arrival and (
-                        arrival.date() != day or arrival.time() > query.latest_arrival):
+                arrival_day = (query.departure_date if query.previous_day_earliest_departure
+                               and query.departure_date and day < query.departure_date else day)
+                if query.latest_arrival and arrival > datetime.combine(
+                        arrival_day, query.latest_arrival, tzinfo=CHINA):
                     continue
                 option = RailOption(code=cells[3], from_station=names[cells[6]],
                     to_station=names[cells[7]], departure=departure, arrival=arrival,
@@ -168,19 +170,24 @@ def query_transport(query: TransportQuery, web: WebSearchClient | None, rail: Ra
     if query.return_date and query.return_date < query.departure_date:
         result.missing = ["返程日期早于去程，请确认日期"]
         return result
-    directions = [(query.origin, query.destination, query.departure_date)]
+    directions = [(query.origin, query.destination, query.departure_date, query)]
+    if query.previous_day_earliest_departure and "rail" in query.modes:
+        # 增加前夜候选；即便为空或查询失败，原出发日也独立查询。
+        directions.insert(0, (query.origin, query.destination,
+            query.departure_date - timedelta(days=1), query.model_copy(update={
+                "earliest_departure": query.previous_day_earliest_departure, "modes": ["rail"]})))
     if query.return_date:
-        directions.append((query.destination, query.origin, query.return_date))
-    for index, (origin, destination, day) in enumerate(directions):
-        leg = TransportLeg(origin=origin, destination=destination, date=day)
-        limits = query if index == 0 else query.model_copy(update={
+        directions.append((query.destination, query.origin, query.return_date,
+            query.model_copy(update={
             "earliest_departure": query.return_earliest_departure,
-            "latest_arrival": query.return_latest_arrival})
-        if "rail" in query.modes:
+            "latest_arrival": query.return_latest_arrival})))
+    for origin, destination, day, limits in directions:
+        leg = TransportLeg(origin=origin, destination=destination, date=day)
+        if "rail" in limits.modes:
             progress("transport", f"正在查询{day} {origin}至{destination}的12306车次和票价")
             leg.rail = rail.query(origin, destination, day, limits,
                                   today or datetime.now(CHINA).date())
-        if "flight" in query.modes:
+        if "flight" in limits.modes:
             progress("transport", f"正在查询{day} {origin}至{destination}的航空公司公开信息")
             if web:
                 leg.flights = web.search(f"{day} {origin} {destination} 航班 起飞 到达 票价",
@@ -196,27 +203,33 @@ def query_transport(query: TransportQuery, web: WebSearchClient | None, rail: Ra
 
 def render_rail(result: TransportResult) -> str:
     lines = []
-    for leg in result.legs:
+    for index, leg in enumerate(result.legs):
         if not leg.rail:
             continue
         rail = leg.rail
         lines += [f"### {leg.date} {leg.origin} → {leg.destination} · 铁路查询", ""]
-        earliest = (result.query.earliest_departure if leg is result.legs[0]
-                    else result.query.return_earliest_departure)
-        latest = (result.query.latest_arrival if leg is result.legs[0]
-                  else result.query.return_latest_arrival)
+        previous_day = bool(result.query.departure_date and leg.date < result.query.departure_date)
+        outbound = index == 0 or previous_day or (
+            bool(result.query.previous_day_earliest_departure) and index == 1)
+        earliest = (result.query.previous_day_earliest_departure if previous_day else
+                    result.query.earliest_departure if outbound else
+                    result.query.return_earliest_departure)
+        latest = result.query.latest_arrival if outbound else result.query.return_latest_arrival
+        if result.query.previous_day_earliest_departure and outbound:
+            lines += ["额外考虑的前一晚。" if previous_day else "原出发日，继续查询。", ""]
         if earliest or latest:
             limits = ([f"{earliest:%H:%M}及以后出发"] if earliest else [])
-            limits += [f"当日{latest:%H:%M}及以前到达"] if latest else []
+            arrival_day = str(result.query.departure_date) if previous_day else "当日"
+            limits += [f"{arrival_day}{latest:%H:%M}及以前到达"] if latest else []
             lines += ["筛选条件：" + "，".join(limits) + "。", ""]
         if rail.options:
-            lines += ["| 车次与车站 | 出发—到达 | 车上耗时 | 成人二等座 | 余票 |",
-                      "| --- | --- | --- | --- | --- |"]
+            lines += ["| 车次 | 出发站 → 到达站 | 出发 → 到达 | 耗时 | 二等座/人 | "
+                      "成人票参考小计 | 余票 |",
+                      "| --- | --- | --- | --- | --- | --- | --- |"]
             for option in rail.options:
                 price = f"¥{option.price}/人" if option.price is not None else "票价未取得"
-                if option.price is not None and result.query.travelers:
-                    price += (f"；{result.query.travelers}张成人票参考"
-                              f"¥{option.price * result.query.travelers}")
+                subtotal = (f"{result.query.travelers}人 ¥{option.price * result.query.travelers}"
+                            if option.price is not None and result.query.travelers else "待确认")
                 arrival = option.arrival.strftime("%H:%M")
                 if option.arrival.date() != leg.date:
                     arrival += f"（{option.arrival:%m-%d}）"
@@ -224,9 +237,9 @@ def render_rail(result: TransportResult) -> str:
                 if (result.query.travelers and seats.isdigit()
                         and int(seats) < result.query.travelers):
                     seats += "（不足同行人数）"
-                lines.append(f"| {option.code} {option.from_station}→{option.to_station} | "
+                lines.append(f"| **{option.code}** | {option.from_station} → {option.to_station} | "
                     f"{option.departure:%H:%M}—{arrival} | {option.duration_minutes // 60}小时"
-                    f"{option.duration_minutes % 60}分 | {price} | {seats} |")
+                    f"{option.duration_minutes % 60}分 | {price} | {subtotal} | {seats} |")
         elif rail.status == "empty":
             lines += ["本次查询未返回符合时间条件的直达高铁/动车。"]
         lines += ["", rail.note, "", f"[12306查询来源]({rail.source_url}) · "
