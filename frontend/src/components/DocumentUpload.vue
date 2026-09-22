@@ -2,6 +2,7 @@
 /** 上传组件层：批量上传后由后端自动切片和索引，页面按每份资料显示处理进度。 */
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { readDocumentJob, startDocumentIndex, uploadDocument, type DocumentDetail, type DocumentJobState } from '../api/documents'
+import ChatIcon from './ChatIcon.vue'
 
 const props = defineProps<{ active: boolean; disabled: boolean }>()
 const emit = defineEmits<{
@@ -122,11 +123,11 @@ onBeforeUnmount(() => { mounted = false; stopped.value = true; clearTimeout(time
 
 <template>
   <div class="document-upload">
-    <label for="travel-document-file">选择资料文件（可多选）</label>
+    <div class="upload-heading"><ChatIcon name="file" /><div><strong>添加旅行资料</strong><p>PDF、DOCX、TXT、Markdown · 单份最多 20 MiB</p></div></div>
+    <label class="choose-file" for="travel-document-file">选择资料文件（可多选）</label>
     <input id="travel-document-file" type="file" multiple accept=".pdf,.docx,.txt,.md,.markdown"
       :disabled="busy || disabled" @change="choose" />
-    <p>PDF、DOCX、TXT、Markdown · 单份最多 20 MiB<br />扫描版 PDF 暂不支持文字识别。</p>
-    <p>上传后自动识别城市与类别、切片并建立索引。建立索引会调用已配置的向量服务。</p>
+    <p>上传后自动识别城市与类别、切片并建立索引。扫描版 PDF 暂不支持文字识别。</p>
     <template v-if="queue.length">
       <p role="status">共 {{ queue.length }} 份 · 已确认保存 {{ confirmed }} 份 · 索引完成 {{ completed }} 份 · 待上传 {{ pending.length }} 份</p>
       <div class="upload-actions">
@@ -143,17 +144,21 @@ onBeforeUnmount(() => { mounted = false; stopped.value = true; clearTimeout(time
         </li>
       </ul>
     </template>
-    <p>重新选择会替换本批列表。刷新或关闭页面后，待传文件需重新选择；已保存资料仍在库中。</p>
+    <p class="upload-note">重新选择会替换本批列表。刷新或关闭页面后，待传文件需重新选择；已保存资料仍在库中。</p>
   </div>
 </template>
 
 <style scoped>
-.document-upload { padding: 16px; background: #f3f7f4; border-radius: 10px; }
-label { display: block; font-weight: 600; margin-bottom: 12px; }
-input { width: 100%; font: inherit; }
-p, li span { font-size: 13px; line-height: 1.8; color: #63756b; }
+.document-upload { padding: 20px; background: #fafcf7; border: 1px dashed #cddcc2; border-radius: 10px; margin-bottom: 20px; }
+.upload-heading { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }.upload-heading>.chat-icon { color: #7b9a68; width: 28px; height: 28px; }.upload-heading strong { font-size: 14px; color: #4e7043; }.upload-heading p { margin: 4px 0 0; }
+.choose-file { display: inline-block; padding: 8px 12px; border: 1px solid #cddcc2; border-radius: 6px; font-size: 12px; background: white; color: #567d45; cursor: pointer; }
+input { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+.document-upload:has(input:focus-visible) .choose-file { outline: 2px solid #7eaa6d; outline-offset: 3px; }
+.document-upload:has(input:disabled) .choose-file { opacity: .5; cursor: default; }
+p, li span { font-size: 12px; line-height: 1.8; color: #758869; }
+.upload-note { margin-bottom: 0; font-size: 11px; }
 .upload-actions { display: flex; gap: 8px; flex-wrap: wrap; }
-button { background: #286c54; color: white; border: 0; border-radius: 6px; padding: 8px 12px; font: inherit; cursor: pointer; }
+button { background: #397352; color: white; border: 0; border-radius: 6px; padding: 8px 12px; font: inherit; font-size: 12px; cursor: pointer; }
 button:disabled { opacity: .5; cursor: default; }
 button:focus-visible { outline: 3px solid #90b9a5; outline-offset: 2px; }
 ul { padding: 0; list-style: none; max-height: 280px; overflow-y: auto; }

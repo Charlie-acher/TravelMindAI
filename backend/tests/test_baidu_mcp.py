@@ -71,6 +71,8 @@ def test_connection_failure_is_sanitized(monkeypatch):
 def test_errors_limits_and_business_exception(monkeypatch, status):
     from langchain.mcp import MCPAdapter
 
+    from app.services.chat.metrics import measure_run
+
     server = FastMCP("次数限制")
     calls = []
 
@@ -83,13 +85,16 @@ def test_errors_limits_and_business_exception(monkeypatch, status):
 
     client = BaiduMCPClient(Settings(baidu_map_api_key="test-key"))
     monkeypatch.setattr(client, "_adapter", lambda: MCPAdapter(server))
-    with pytest.raises(RuntimeError, match="business-failed"):
+    with measure_run("map-errors") as run, pytest.raises(RuntimeError, match="business-failed"):
         with client.open_tools() as bundle:
             for _ in range(25):
                 reply = bundle.tools[0].invoke({"district_id": "330100"})
                 assert "test-key" not in str(reply)
             assert len(calls) == 24 and not bundle.evidence
             raise RuntimeError("business-failed")
+    tools = [step for step in run.process_snapshot()["steps"] if step.get("call_id")]
+    assert len(tools) == 25
+    assert all(step["status"] == "failed" for step in tools)
 
 
 """流式持久化测试函数：真实协议查询交给Agent，历史恢复和重试不重新连接。"""

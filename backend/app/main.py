@@ -24,10 +24,12 @@ from app.api.document.search import router as document_search_router
 from app.api.document.upload_limits import DocumentUploadLimitMiddleware
 from app.api.errors import register_error_handlers
 from app.api.health import router as health_router
+from app.api.personal_files import router as personal_files_router
 from app.api.requirement.history import router as requirement_history_router
 from app.api.requirement.routes import router as requirements_router
 from app.api.trips import router as sessions_router
 from app.api.usage import router as usage_router
+from app.api.workspace import router as workspace_router
 from app.config import Settings, load_settings
 from app.database import create_database_engine
 from app.llm.gateway import GatewayState
@@ -123,6 +125,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(health_router, prefix="/api/v1")
     app.include_router(auth_router, prefix="/api/v1")
     app.include_router(usage_router, prefix="/api/v1")
+    app.include_router(personal_files_router, prefix="/api/v1")
+    app.include_router(workspace_router, prefix="/api/v1")
 
     # /api/v1 与 router 的 /budget、函数的 /estimate 拼成完整接口路径。
     app.include_router(budget_router, prefix="/api/v1")

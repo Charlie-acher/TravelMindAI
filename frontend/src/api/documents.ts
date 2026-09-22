@@ -125,6 +125,21 @@ export async function generateDocumentChunks(id: string): Promise<DocumentChunkP
 /** 命中类型：正文和位置来自数据库，score为混合排序分，不代表内容正确率。 */
 export interface SearchHit { score: number; file_name: string; chunk: DocumentChunk }
 
+/** 检索测试条件：沿用管理员搜索合同，空文件编号表示搜索共享资料库。 */
+export interface DocumentSearchRequest extends DocumentMetadata {
+  query: string
+  limit: number
+  document_id: string | null
+}
+export interface DocumentSearchResult { items: SearchHit[] }
+
+/** 检索测试函数：返回真实原文片段与混合排序分，不生成回答或模拟命中。 */
+export async function searchDocuments(request: DocumentSearchRequest): Promise<DocumentSearchResult> {
+  return readResponse(await apiFetch('/api/v1/admin/document-search', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(request),
+  }))
+}
+
 /** 地图坐标类型：新查询使用百度坐标，旧历史保留GCJ-02，页面不能猜测或混用。 */
 export interface GeoPoint { longitude: number; latitude: number; coordinate_system: 'BD-09' | 'GCJ-02' }
 export interface MapLookup {

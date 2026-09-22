@@ -1,0 +1,30 @@
+<!doctype html>
+<!-- 交互设计稿：沿用 TravelMind 绿色品牌和细线图标，展示已确认的三栏工作区。所有会话和统计均为示例，不连接业务接口。 -->
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>TravelMind · 对话工作区设计</title><link rel="icon" href="logo-mark.svg" type="image/svg+xml"><link rel="stylesheet" href="workspace.css"></head>
+<body>
+<div class="app" id="app">
+  <button class="scrim" data-action="sidebar" aria-label="关闭导航"></button>
+  <aside class="sidebar">
+    <div class="brand-row"><a class="brand" href="#chat" aria-label="TravelMind 对话主页"><img src="logo-mark.svg" alt=""><span>Travel<em>Mind</em></span></a><button class="icon-button" data-action="collapse" aria-label="收起侧栏" title="收起侧栏"><i data-icon="panel"></i></button></div>
+    <nav class="main-nav" aria-label="主导航">
+      <button class="nav-item new-chat" data-action="new"><i data-icon="new"></i><span>新建对话</span><kbd>Ctrl K</kbd></button>
+      <button class="nav-item" data-page="space"><i data-icon="drive"></i><span>个人空间</span></button>
+      <button class="nav-item admin-only" data-page="knowledge"><i data-icon="books"></i><span>知识库</span><span class="mini-label">管理</span></button>
+    </nav>
+    <div class="recent-label"><span>最近 <i data-icon="chevron"></i></span><button class="icon-button" data-action="history-search" aria-label="搜索对话" title="搜索对话"><i data-icon="search"></i></button></div>
+    <div id="history-search" class="history-search" hidden><input aria-label="搜索最近对话" placeholder="搜索最近对话"></div>
+    <nav class="histories" aria-label="最近对话" id="histories"></nav>
+    <div class="sidebar-footer"><div class="prototype-note"><span class="dot"></span>交互设计稿 · 示例数据</div><button class="profile" data-action="profile" aria-expanded="false"><span class="avatar">旅</span><span class="profile-text"><strong>旅行体验账号</strong><small id="role-label">管理员</small></span><i data-icon="more"></i></button></div>
+  </aside>
+  <main class="main">
+    <header class="topbar"><div class="heading"><button class="icon-button reveal" data-action="sidebar" aria-label="展开导航"><i data-icon="panel"></i></button><span id="page-title">苏州三日慢游计划</span><span class="header-caption" id="page-caption">私人对话</span></div><div class="top-actions" id="top-actions"><button class="top-tab" data-panel="status"><i data-icon="status"></i><span>状态</span></button><button class="top-tab" data-panel="files"><i data-icon="folder"></i><span>文件</span><b>3</b></button></div></header>
+    <div class="workspace" id="workspace"><section id="page-content" class="page-content"></section><aside id="inspector" class="inspector" aria-label="对话侧面板" hidden></aside></div>
+  </main>
+</div>
+<div id="account-menu" class="account-menu" hidden><div class="menu-heading">身份预览</div><button data-role="admin"><i data-icon="shield"></i>管理员<span>知识库管理</span></button><button data-role="user"><i data-icon="user"></i>普通用户<span>私人旅行空间</span></button><div class="menu-divider"></div><button class="admin-only" data-action="costs"><i data-icon="chart"></i>调用费用<span>管理员功能</span></button></div>
+<dialog id="preview-dialog"><header><span id="dialog-title">文件预览</span><div class="row"><button class="icon-button" data-action="download" aria-label="下载示例文件" title="下载示例文件"><i data-icon="download"></i></button><button class="icon-button" data-action="close-dialog" aria-label="关闭预览"><i data-icon="close"></i></button></div></header><div id="dialog-content"></div></dialog>
+<input id="local-files" type="file" multiple hidden accept=".pdf,.docx,.txt,.md,.png,.jpg,.jpeg">
+<div id="toast" class="toast" role="status" hidden></div>
+<script src="workspace.js"></script>
+</body></html>

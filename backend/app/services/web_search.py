@@ -10,6 +10,7 @@ from pydantic import ValidationError
 
 from app.config import Settings
 from app.schemas.document.answer import WebEvidence, WebSearchResult
+from app.services.chat.events import traced_tool
 from app.services.usage import usage_call
 
 
@@ -26,6 +27,7 @@ class WebSearchClient:
 
     """搜索函数：一次最多五条网页，只保留原文摘要及其位置和时间。"""
 
+    @traced_tool("search", "联网检索")
     def search(self, query: str, *, domains: list[str] | None = None) -> WebSearchResult:
         allowed = self.domains if domains is None else domains
         if self.key is None or not self.key.get_secret_value().strip() or not allowed:

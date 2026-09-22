@@ -23,11 +23,15 @@ export interface TravelRequirement {
 /** 最近旅行话题与长对话摘要均由服务端保存；旧历史可以没有这些字段。 */
 export interface ConversationState { topic_cities: string[]; topic_places: string[] }
 export interface HistorySummary { text: string; covered_revision: number }
+/** 公开过程类型：工具编号用于合并开始和结束，不保存模型内部推理。 */
+export interface ProcessStep { stage: string; message: string; call_id?: string; status?: 'running' | 'completed' | 'failed' | 'cancelled'; elapsed_seconds?: number; summary?: string }
+export interface ProcessSnapshot { steps: ProcessStep[]; seconds: number; timings?: Record<string, number> }
 export interface WorkflowResume { run_id: string; action: 'continue' | 'accept' | 'cancel' }
 export interface WorkflowSnapshot { run_id: string; status: 'waiting' | 'completed' | 'cancelled'; attempts: number; issues: string[]; can_accept: boolean; preview?: TravelPlan | null }
 
 /** 一次对话响应：文字回复用于左边聊天，结构化需求用于右边卡片。 */
 export interface ChatResponse {
+  process?: ProcessSnapshot | null
   selected_provider?: ModelProvider
   used_providers?: ModelProvider[]
   result: {
@@ -98,7 +102,7 @@ export interface DiningResult {
 export type RequirementUpdate =
   | { event: 'metrics'; data: { stages_seconds: Record<string, number>; first_draft_seconds: number | null; total_seconds: number } }
   | { event: 'fallback'; data: { from_alias: ModelProvider; to_alias: ModelProvider; reason_category: string } }
-  | { event: 'progress'; data: { stage: string; message: string } }
+  | { event: 'progress'; data: ProcessStep }
   | { event: 'draft'; data: { text: string } }
   | { event: 'reset'; data: Record<string, never> }
 
@@ -184,10 +188,16 @@ export interface ConversationHistory { session_id: string; revision: number; tur
 export interface PendingMessage { message: string; message_id: string; expected_revision: number; attachment_ids?: string[]; workflow_resume?: WorkflowResume; selected_provider?: ModelProvider }
 export interface SessionSummary { id: string; thread_id: string; title: string; status: string; created_at: string; updated_at: string }
 export interface SessionPage { items: SessionSummary[]; next_cursor: string | null }
+/** 会话摘要函数：从个人文件进入较早对话时仍可取得真实标题。 */
+export async function getSession(sessionId: string): Promise<SessionSummary> {
+  const result = await readResponse<{ session: SessionSummary }>(await apiFetch(`/api/v1/sessions/${encodeURIComponent(sessionId)}`, { cache: 'no-store' }))
+  return result.session
+}
 /** 历史列表来自当前账号的服务端分页，浏览器不负责用户隔离。 */
-export async function listSessions(cursor: string | null = null): Promise<SessionPage> {
+export async function listSessions(cursor: string | null = null, query = ''): Promise<SessionPage> {
   const params = new URLSearchParams({ limit: '30' })
   if (cursor) params.set('cursor', cursor)
+  if (query) params.set('q', query)
   return readResponse(await apiFetch(`/api/v1/sessions?${params}`, { cache: 'no-store' }))
 }
 

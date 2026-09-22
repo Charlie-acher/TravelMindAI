@@ -80,6 +80,8 @@ class Settings(BaseSettings):
         default_factory=dict,
     )
     model_gateway: GatewaySettings = Field(default_factory=GatewaySettings)
+    # 按实际返回型号配置容量；未知型号不猜测上下文百分比。
+    model_context_windows: dict[str, Annotated[int, Field(gt=0)]] = Field(default_factory=dict)
 
     # 私人图片只发送到显式配置的百炼视觉入口，不自动复用文本或向量密钥。
     vision_api_key: SecretStr | None = None

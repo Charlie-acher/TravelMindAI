@@ -245,13 +245,13 @@ def test_stream_disconnect_keeps_worker_alive(monkeypatch) -> None:
         request = SimpleNamespace(state=SimpleNamespace(request_id="test"),
                                   app=SimpleNamespace(state=SimpleNamespace(
                                       settings=Settings(), chat_workers=set(), model_gateway=Mock(),
-                                      chat_cancellations={},
+                                      chat_cancellations={}, database_engine=None,
                                   )))
         response = await routes.stream_saved_message(
             uuid4(), SavedRequirementMessage(
                 message="杭州", message_id=uuid4(), expected_revision=0,
             ),
-            request, Mock(),
+            request, Mock(), SimpleNamespace(id=uuid4()),
         )
         iterator = response.body_iterator
         assert "received" in await anext(iterator)
@@ -323,7 +323,8 @@ def test_stop_waits_for_worker_and_never_sends_done(monkeypatch) -> None:
                 chat_workers=set(), model_gateway=Mock(), chat_cancellations={})))
         session_id, message_id = uuid4(), uuid4()
         response = await routes.stream_saved_message(session_id, SavedRequirementMessage(
-            message="杭州", message_id=message_id, expected_revision=0), request, Mock())
+            message="杭州", message_id=message_id, expected_revision=0), request, Mock(),
+            SimpleNamespace(id=uuid4()))
         iterator = response.body_iterator
         assert "received" in await anext(iterator)
         assert "已经开始" in await anext(iterator)

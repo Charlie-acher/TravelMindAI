@@ -24,6 +24,7 @@ class RunMetrics:
         self.stages: dict[str, float] = {}
         self.first_draft: float | None = None
         self.models: list[dict[str, Any]] = []
+        self.steps: list[dict[str, Any]] = []
 
     """事件记录函数：正文只用于确定首段到达时间，不保存正文内容。"""
 
@@ -32,8 +33,26 @@ class RunMetrics:
             now = perf_counter()
             self.stages[self.stage] = self.stages.get(self.stage, 0) + now - self.changed
             self.stage, self.changed = str(data["stage"]), now
+            if isinstance(data.get("message"), str):
+                step = dict(data)
+                existing = next((item for item in self.steps if data.get("call_id")
+                                 and item.get("call_id") == data["call_id"]), None)
+                if existing is not None:
+                    existing.update(step)
+                else:
+                    self.steps.append(step)
         elif event == "draft" and data.get("text") and self.first_draft is None:
             self.first_draft = perf_counter() - self.started
+
+    """过程快照函数：随最终回答保存公开步骤，刷新历史无需再次调用工具。"""
+
+    def process_snapshot(self) -> dict[str, Any]:
+        now = perf_counter()
+        timings = dict(self.stages)
+        timings[self.stage] = timings.get(self.stage, 0) + now - self.changed
+        return {"steps": [dict(step) for step in self.steps],
+                "seconds": round(now - self.started, 3),
+                "timings": {key: round(value, 3) for key, value in timings.items()}}
 
     """完成函数：未知token和费用保持未知，阶段间隔不冒充独立工具纯执行时间。"""
 

@@ -25,6 +25,9 @@ def save_usage(engine: Engine | None, call: dict[str, Any]) -> None:
         with engine.begin() as connection:
             statement = insert(UsageEvent).values(id=UUID(call["id"]),
                 request_id=call["request_id"],
+                user_id=UUID(call["user_id"]) if call.get("user_id") else None,
+                session_id=UUID(call["session_id"]) if call.get("session_id") else None,
+                message_id=UUID(call["message_id"]) if call.get("message_id") else None,
                 started_at=datetime.fromisoformat(call["started_at"]),
                 payload_json={**call, "persisted": True})
             connection.execute(statement.on_conflict_do_update(

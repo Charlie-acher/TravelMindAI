@@ -77,5 +77,7 @@ onBeforeUnmount(() => { alive = false; ++generation; clearTimeout(timer) })
 <style scoped>
 .document-job { border-top: 1px solid #dfe8e2; padding: 8px 0; margin: 8px 0; }
 p { font-size: 13px; line-height: 1.5; margin: 5px 0; }
-button { margin: 4px 8px 4px 0; padding: 8px 12px; cursor: pointer; }
+button { margin: 4px 8px 4px 0; padding: 8px 12px; cursor: pointer; border: 1px solid #dce6d4; background: #f7faf3; border-radius: 6px; color: #527447; font: inherit; font-size: 12px; }
+button:disabled { opacity: .5; cursor: default; }
+button:focus-visible { outline: 2px solid #7eaa6d; outline-offset: 2px; }
 </style>

@@ -16,6 +16,7 @@ from app.llm.embeddings import EmbeddingClient, EmbeddingError
 from app.models.document import DocumentChunkRecord, DocumentRecord
 from app.schemas.document.base import DocumentChunk, DocumentMetadata
 from app.schemas.document.search import DocumentContext, IndexProgress, SearchHit, SearchResult
+from app.services.chat.events import traced_tool
 from app.services.document.vector_store import MilvusError, MilvusStore
 
 """搜索上下文函数：只有带指代的追问才借用历史，完整新问题按自己的地点搜索。"""
@@ -241,6 +242,9 @@ class DocumentSearchService:
 
     """混合搜索函数：按排名融合文字与语义候选，完整标题优先，统一回查原文。"""
 
+    @traced_tool("knowledge", "检索知识库", lambda result:
+        f"检索到 {len(result.items)} 个相关片段。" + "、".join(dict.fromkeys(
+            item.file_name for item in result.items))[:500])
     def search(
         self, query: str, limit: int, document_id: UUID | None = None,
         *, metadata: DocumentMetadata | None = None,
@@ -298,6 +302,9 @@ class DocumentSearchService:
 
     """同节展开函数：核对当前范围，围绕命中点最多读取五段连续同节原文。"""
 
+    @traced_tool("knowledge_read", "读取资料原文", lambda result:
+        f"{result.file_name} · 读取 {len(result.items)} 个片段"
+        + ("，仅展示部分同节原文" if result.truncated else ""))
     def read_context(
         self, chunk_id: UUID, *, metadata: DocumentMetadata | None = None,
     ) -> DocumentContext:

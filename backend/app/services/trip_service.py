@@ -95,7 +95,8 @@ class TripService:
 
         # begin() 管理完整事务：正常退出时 commit；抛异常时 rollback；最后关闭 Session。
         with self._sessions.begin() as unit:
-            trip = TravelSession(title=title, user_id=user_id)
+            trip = TravelSession(title=title, user_id=user_id,
+                title_source="pending" if title in {"新建对话", "旅行需求对话"} else "manual")
             unit.add(trip)
             unit.flush()  # 发出 INSERT，取得数据库生成的时间等字段，但此时还没有提交。
         # 走到 with 外面才表示提交成功；失败时异常会直接向调用方传播。
@@ -111,10 +112,13 @@ class TripService:
 
     def list_sessions(
         self, user_id: UUID, limit: int, cursor: tuple[datetime, UUID] | None = None,
+        q: str | None = None,
     ) -> list[TravelSession]:
         query = select(TravelSession).where(
             TravelSession.user_id == user_id, TravelSession.status == "active",
         )
+        if q and q.strip():
+            query = query.where(TravelSession.title.icontains(q.strip(), autoescape=True))
         if cursor is not None:
             query = query.where(tuple_(TravelSession.updated_at, TravelSession.id) < cursor)
         with self._sessions() as unit:
@@ -136,6 +140,7 @@ class TripService:
             if trip is None:
                 raise SessionNotFoundError("旅行会话不存在")
             trip.title = title
+            trip.title_source = "manual"
             unit.flush()
         return trip
 

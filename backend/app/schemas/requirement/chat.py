@@ -31,11 +31,31 @@ class RequirementMessage(BaseModel):
     selected_provider: SelectableProvider = "deepseek"
 
 
+class ProcessStep(BaseModel):
+    """公开步骤类：仅保存实际阶段及工具结果。"""
+
+    stage: str
+    message: str
+    call_id: str | None = None
+    status: Literal["running", "completed", "failed", "cancelled"] | None = None
+    elapsed_seconds: float | None = None
+    summary: str | None = None
+
+
+class ProcessSnapshot(BaseModel):
+    """过程快照类：历史记录恢复步骤及耗时，不包含内部推理。"""
+
+    steps: list[ProcessStep] = Field(default_factory=list)
+    seconds: float
+    timings: dict[str, float] = Field(default_factory=dict)
+
+
 class RequirementChatResponse(BaseModel):
     """聊天响应类：返回回复文字和最新旅行需求。"""
 
     result: RequirementResult
     reply: str
+    process: ProcessSnapshot | None = None
     status: Literal["needs_clarification", "complete", "unsupported", "knowledge"]
     changed_fields: list[str]  # 本轮实际发生变化的业务字段，供前端高亮。
     request_id: str  # 排查失败时可对照响应头X-Request-ID。

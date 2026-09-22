@@ -1,0 +1,23 @@
+{
+  "type": "design",
+  "designSystems": [],
+  "primaryDesignSystem": null,
+  "assets": {
+    "TravelMind 对话工作区": {
+      "versions": [
+        {
+          "path": "index.html",
+          "createdAt": "2026-09-22T01:48:29.939Z",
+          "status": "needs-review",
+          "subtitle": "含导航和工具图标，四个页面与文件预览可交互",
+          "viewport": {
+            "width": 1440,
+            "height": 1000
+          }
+        }
+      ]
+    }
+  },
+  "createdAt": "2026-09-22T01:48:29.940Z",
+  "updatedAt": "2026-09-22T01:54:08.271Z"
+}

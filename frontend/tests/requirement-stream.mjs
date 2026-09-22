@@ -31,14 +31,14 @@ try {
     steps: [{ stage: 'search', message: '正在查找苏州资料' }], running: true,
   }) }))
   assert.ok(!processHtml.includes('尚未完成的回答') && !processHtml.includes('回答草稿'))
-  assert.ok(!processHtml.includes(' open'))
-  assert.ok(processHtml.includes('thinking-dot'))
-  assert.match(processHtml, /<summary\b[^>]*>[\s\S]*正在查找苏州资料[\s\S]*查看过程[\s\S]*<\/summary>/)
+  assert.ok(processHtml.includes(' open'), '执行中默认展开真实过程')
+  assert.ok(processHtml.includes('pulsing'))
+  assert.match(processHtml, /<summary\b[^>]*>[\s\S]*正在查找苏州资料[\s\S]*<\/summary>/)
   const finishedHtml = await renderToString(createSSRApp({ render: () => h(ThinkingProcess, {
     steps: [{ stage: 'search', message: '已检索苏州资料' }], seconds: 3, timings: { search: 1.25 },
   }) }))
-  assert.ok(finishedHtml.includes('用时 3 秒'))
-  assert.ok(finishedHtml.includes('累计 1.3 秒'))
+  assert.ok(finishedHtml.includes('3.0 秒'))
+  assert.ok(!finishedHtml.includes('1.3 秒'), '阶段累计时间不冒充真实工具用时')
   assert.ok(!finishedHtml.includes(' open'))
   assert.ok(!finishedHtml.includes('回答草稿内容'))
   const { default: AnswerSources } = await server.ssrLoadModule('/src/components/AnswerSources.vue')
@@ -233,7 +233,7 @@ try {
   assert.deepEqual(state.messages.value.at(-1).restaurants, [restaurant])
   assert.deepEqual(state.messages.value.at(-1).knowledge, knowledge)
   assert.deepEqual(state.messages.value.at(-1).process.steps, [{ stage: 'answer', message: '已生成最终回答' }])
-  assert.equal(state.messages.value.at(-1).process.draft, '最终公开草稿', 'done后先把本页过程保存到消息，再清理在途状态')
+  assert.equal(state.messages.value.at(-1).process.draft, undefined, '过程不保存回答草稿')
   assert.equal(state.draft.value, '')
   const remembered = JSON.parse(storage.get('travelmind.requirement-conversation.v2.test-account'))
   assert.equal(remembered.pending, null)

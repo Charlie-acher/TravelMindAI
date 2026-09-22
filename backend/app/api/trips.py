@@ -63,6 +63,7 @@ def list_sessions(
     service: TripServiceDependency, user: CurrentUser,
     limit: Annotated[int, Query(ge=1, le=100)] = 30,
     cursor: Annotated[str | None, Query(max_length=100)] = None,
+    q: Annotated[str | None, Query(max_length=200)] = None,
 ) -> SessionPage:
     position = None
     if cursor is not None:
@@ -74,7 +75,7 @@ def list_sessions(
             position = (stamp, UUID(identifier))
         except ValueError:
             raise HTTPException(422, "历史分页游标无效，请重新加载") from None
-    rows = service.list_sessions(user.id, limit, position)
+    rows = service.list_sessions(user.id, limit, position, q)
     items = rows[:limit]
     next_cursor = None
     if len(rows) > limit:

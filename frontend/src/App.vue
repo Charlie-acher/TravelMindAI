@@ -1,13 +1,15 @@
 <script setup lang="ts">
 /** 页面组合层：登录后读取自己的会话；管理员另可管理共享资料。 */
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Alert as AAlert, Button as AButton, Modal } from '@arco-design/web-vue'
 import { currentAccount, login, logout, register, type Account } from './api/auth'
-import { modelNames, type ModelOption, getModelStatus, listSessions, renameSession, type SessionSummary } from './api/requirements'
+import { modelNames, type ModelOption, getModelStatus, getSession, listSessions, renameSession, type SessionSummary } from './api/requirements'
 import { advanceAuthGeneration, ApiError } from './api/http'
 import { useRequirementConversation } from './useRequirementConversation'
 import DocumentPanel from './components/DocumentPanel.vue'
 import UsagePanel from './components/UsagePanel.vue'
+import WorkspaceStatus from './components/WorkspaceStatus.vue'
+import PersonalFilesPanel from './components/PersonalFilesPanel.vue'
 import AttractionCards from './components/AttractionCards.vue'
 import RestaurantCards from './components/RestaurantCards.vue'
 import ItineraryCard from './components/ItineraryCard.vue'
@@ -31,7 +33,69 @@ const confirmPassword = ref('')
 const registering = ref(false)
 const authDialog = ref<HTMLDialogElement | null>(null)
 const pendingQuestion = ref<string | null>(null)
-const activePage = ref<'chat' | 'documents' | 'usage'>('chat')
+const activePage = ref<'chat' | 'documents' | 'usage' | 'space'>('chat')
+const inspector = ref<'status' | 'files' | null>(null)
+const workspaceBody = ref<HTMLElement | null>(null)
+const inspectorWidth = ref(360)
+const workspaceWidth = ref(window.innerWidth)
+const resizing = ref(false)
+const refreshKey = ref(0)
+const historySearchOpen = ref(false)
+const historySearchInput = ref<HTMLInputElement | null>(null)
+const panelButton = ref<HTMLButtonElement | null>(null)
+const inspectorElement = ref<HTMLElement | null>(null)
+const narrowInspector = computed(() => workspaceWidth.value < 900)
+const maxInspectorWidth = computed(() => Math.min(760, Math.max(300, workspaceWidth.value - 447)))
+const displayedInspectorWidth = computed(() => Math.min(inspectorWidth.value, maxInspectorWidth.value))
+let workspaceObserver: ResizeObserver | undefined
+let searchTimer: ReturnType<typeof setTimeout> | undefined
+let dragStart: { x: number; width: number } | null = null
+let inspectorTrigger: HTMLElement | null = null
+
+/** 宽度保存函数：只记住布局偏好，不把私人会话内容写入本地存储。 */
+function setInspectorWidth(width: number): void {
+  inspectorWidth.value = Math.round(Math.max(300, Math.min(maxInspectorWidth.value, width)))
+  try { localStorage.setItem('travelmind.workspace.inspector-width.v1', String(inspectorWidth.value)) } catch { /* 禁用存储时继续使用本页宽度。 */ }
+}
+/** 拖动函数：指针捕获保证移出分隔线后仍能连续调整。 */
+function startResize(event: PointerEvent): void {
+  if (event.button !== 0 || narrowInspector.value) return
+  dragStart = { x: event.clientX, width: displayedInspectorWidth.value }
+  resizing.value = true
+  ;(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId)
+  event.preventDefault()
+}
+function moveResize(event: PointerEvent): void {
+  if (dragStart) setInspectorWidth(dragStart.width + dragStart.x - event.clientX)
+}
+function endResize(): void { dragStart = null; resizing.value = false }
+/** 键盘调整函数：左右方向键移动分隔线，Home/End选择边界。 */
+function resizeWithKeyboard(event: KeyboardEvent): void {
+  const step = event.shiftKey ? 50 : 20
+  const widths: Record<string, number> = { ArrowLeft: displayedInspectorWidth.value + step, ArrowRight: displayedInspectorWidth.value - step, Home: 300, End: maxInspectorWidth.value }
+  if (event.key in widths) { event.preventDefault(); setInspectorWidth(widths[event.key]!) }
+}
+async function toggleInspector(tab: 'status' | 'files'): Promise<void> {
+  inspectorTrigger = document.activeElement as HTMLElement | null
+  inspector.value = inspector.value === tab ? null : tab
+  if (inspector.value && narrowInspector.value) { await nextTick(); inspectorElement.value?.focus() }
+}
+function closeInspector(): void { inspector.value = null; (inspectorTrigger ?? panelButton.value)?.focus() }
+/** 抽屉键盘函数：窄屏时焦点留在面板中，Escape关闭后回到入口。 */
+function onInspectorKeydown(event: KeyboardEvent): void {
+  if (!narrowInspector.value || event.key !== 'Tab') return
+  const items = inspectorElement.value?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), a[href], [tabindex="0"]')
+  if (!items?.length) return
+  const first = items[0]!, last = items[items.length - 1]!
+  if (event.shiftKey && (document.activeElement === first || document.activeElement === inspectorElement.value)) { event.preventDefault(); last.focus() }
+  else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus() }
+}
+watch(workspaceBody, element => {
+  workspaceObserver?.disconnect()
+  if (!element) return
+  workspaceObserver = new ResizeObserver(entries => { workspaceWidth.value = entries[0]!.contentRect.width })
+  workspaceObserver.observe(element)
+})
 const documentsOpened = ref(false)
 const sessions = ref<SessionSummary[]>([])
 const nextCursor = ref<string | null>(null)
@@ -41,7 +105,7 @@ const deletingId = ref<string | null>(null)
 let deleteDialog: ReturnType<typeof Modal.confirm> | null = null
 let authGeneration = 0
 let listGeneration = 0
-const { messages, input, selectedProvider, sessionId, busy, stopping, canStop, stop, restoring, restoreFailed, error, storageWarning, progress,
+const { messages, input, selectedProvider, sessionId, busy, stopping, canStop, stop, restoring, restoreFailed, error, storageWarning, progress, failedProcess,
   chatArea, initialize, reloadConversation, send: sendConversation,
   selectConversation, clearConversation, deleteConversation, undoDraft, undoTarget, pendingUndo,
   selectedAttachments, uploading, addAttachments, removeAttachment, pendingResume, retryWorkflow } = useRequirementConversation()
@@ -63,19 +127,36 @@ const renamingId = ref<string | null>(null)
 const renameTarget = ref<SessionSummary | null>(null)
 const visibleMessages = computed(() => messages.value.filter(message => message.id !== 'welcome'))
 const emptyChat = computed(() => !visibleMessages.value.length && !busy.value && !restoreFailed.value)
-const currentTitle = computed(() => sessions.value.find(item => item.id === sessionId.value)?.title || '新对话')
-const sessionGroups = computed(() => {
-  const groups = new Map<string, SessionSummary[]>()
-  const today = new Date(); today.setHours(0, 0, 0, 0)
-  const yesterday = new Date(today); yesterday.setDate(today.getDate() - 1)
-  for (const item of sessions.value) {
-    if (!item.title.toLocaleLowerCase().includes(search.value.trim().toLocaleLowerCase())) continue
-    const date = new Date(item.updated_at)
-    const label = date >= today ? '今天' : date >= yesterday ? '昨天' : '更早'
-    if (!groups.has(label)) groups.set(label, [])
-    groups.get(label)!.push(item)
-  }
-  return [...groups].map(([label, items]) => ({ label, items }))
+const selectedSessionTitle = ref('')
+const currentTitle = computed(() => {
+  const saved = sessions.value.find(item => item.id === sessionId.value)?.title || selectedSessionTitle.value
+  const firstQuestion = visibleMessages.value.find(item => item.role === 'user')?.text
+  if (busy.value && (!saved || saved === '新建对话') && firstQuestion) return [...firstQuestion].slice(0, 24).join('')
+  return saved || (sessionId.value ? '旅行对话' : '新对话')
+})
+watch(sessionId, async id => {
+  selectedSessionTitle.value = ''
+  if (!id) return
+  const token = authGeneration
+  const cached = sessions.value.find(item => item.id === id)
+  if (cached) { selectedSessionTitle.value = cached.title; return }
+  try {
+    const saved = await getSession(id)
+    if (token === authGeneration && sessionId.value === id) selectedSessionTitle.value = sessions.value.find(item => item.id === id)?.title || saved.title
+  } catch { /* 标题读取失败不阻止已有对话恢复。 */ }
+})
+watch(sessions, rows => {
+  const current = rows.find(item => item.id === sessionId.value)
+  if (current) selectedSessionTitle.value = current.title
+})
+watch(search, () => {
+  clearTimeout(searchTimer)
+  ++listGeneration
+  nextCursor.value = null
+  searchTimer = setTimeout(() => { void loadSessions() }, 250)
+})
+watch([busy, uploading], ([working, loading], [wasWorking, wasLoading]) => {
+  if ((!working && wasWorking) || (!loading && wasLoading)) refreshKey.value++
 })
 
 /** 历史操作只定位菜单，不读取或发送对话。 */
@@ -122,7 +203,7 @@ function onShortcut(event: KeyboardEvent): void {
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k' && account.value && !renameDialog.value?.open) {
     event.preventDefault(); void newConversation()
   }
-  if (event.key === 'Escape') mobileOpen.value = false
+  if (event.key === 'Escape') { mobileOpen.value = false; if (inspector.value) closeInspector() }
 }
 
 /** 退出或401同步清除私人界面；代数防止旧异步请求回写。 */
@@ -132,6 +213,7 @@ function clearPrivate(): void {
   deleteDialog?.close(); deleteDialog = null; deletingId.value = null
   sessionMenu.value?.hidePopover(); renameDialog.value?.close(); renameTarget.value = null; renamingId.value = null
   menuItem.value = null; search.value = ''; mobileOpen.value = false
+  inspector.value = null; refreshKey.value = 0
   account.value = null; activePage.value = 'chat'; documentsOpened.value = false; sessions.value = []; nextCursor.value = null
   listError.value = ''; listBusy.value = false
   modelState.value = 'checking'; clearConversation()
@@ -193,7 +275,7 @@ async function loadSessions(more = false): Promise<void> {
   const token = ++listGeneration
   listBusy.value = true; listError.value = ''
   try {
-    const page = await listSessions(more ? nextCursor.value : null)
+    const page = await listSessions(more ? nextCursor.value : null, search.value.trim())
     if (token !== listGeneration || !account.value) return
     sessions.value = more ? [...sessions.value, ...page.items] : page.items
     nextCursor.value = page.next_cursor
@@ -365,12 +447,16 @@ function preventFileNavigation(event: DragEvent): void {
 }
 
 onMounted(() => {
+  try {
+    const saved = Number(localStorage.getItem('travelmind.workspace.inspector-width.v1'))
+    if (Number.isFinite(saved) && saved >= 300 && saved <= 760) inspectorWidth.value = saved
+  } catch { /* 本地存储受限不阻止聊天。 */ }
   window.addEventListener('travelmind:unauthorized', unauthorized)
   window.addEventListener('keydown', onShortcut)
   window.addEventListener('dragover', preventFileNavigation)
   window.addEventListener('drop', preventFileNavigation)
 })
-onBeforeUnmount(() => { window.removeEventListener('travelmind:unauthorized', unauthorized); window.removeEventListener('keydown', onShortcut); window.removeEventListener('dragover', preventFileNavigation); window.removeEventListener('drop', preventFileNavigation); deleteDialog?.close() })
+onBeforeUnmount(() => { workspaceObserver?.disconnect(); clearTimeout(searchTimer); window.removeEventListener('travelmind:unauthorized', unauthorized); window.removeEventListener('keydown', onShortcut); window.removeEventListener('dragover', preventFileNavigation); window.removeEventListener('drop', preventFileNavigation); deleteDialog?.close() })
 </script>
 
 <template>
@@ -384,37 +470,36 @@ onBeforeUnmount(() => { window.removeEventListener('travelmind:unauthorized', un
       </div>
       <div class="sidebar-actions">
         <button class="new-chat" :disabled="busy || !!deletingId || !!renamingId" @click="newConversation"><ChatIcon name="plus" /><span>新建对话</span><kbd>Ctrl K</kbd></button>
-        <label class="search"><ChatIcon name="search" /><input v-model="search" type="search" placeholder="搜索历史对话" aria-label="搜索已加载的历史对话" /></label>
+        <button class="workspace-nav" :class="{ selected: activePage === 'space' }" @click="activePage = 'space'; mobileOpen = false"><ChatIcon name="drive" /><span>个人空间</span></button>
+        <button v-if="account.role === 'admin'" class="workspace-nav" :class="{ selected: activePage === 'documents' }" @click="documentsOpened = true; activePage = 'documents'; mobileOpen = false"><ChatIcon name="books" /><span>知识库</span><span class="admin-tag">管理</span></button>
       </div>
-      <div class="history-heading">历史对话<span>{{ sessions.length }}</span></div>
-      <nav class="history-list" aria-label="历史对话">
+      <div class="history-heading"><span>最近</span><button class="icon-button" aria-label="搜索最近对话" title="搜索最近对话" :aria-expanded="historySearchOpen" @click="historySearchOpen = !historySearchOpen; nextTick(() => historySearchInput?.focus())"><ChatIcon name="search" /></button></div>
+      <label v-if="historySearchOpen || search" class="search"><ChatIcon name="search" /><input ref="historySearchInput" v-model="search" type="search" maxlength="200" placeholder="搜索全部对话" aria-label="搜索全部历史对话" /></label>
+      <nav class="history-list" aria-label="最近对话">
         <a-alert v-if="listError" type="error" class="history-error">{{ listError }}<a-button size="mini" @click="loadSessions()">重试加载</a-button></a-alert>
         <p v-if="listBusy && !sessions.length" class="empty-history" role="status">正在读取历史…</p>
-        <p v-else-if="!sessionGroups.length" class="empty-history">{{ search ? '已加载的对话中没有匹配结果。' : '下一段旅程，从新对话开始。' }}</p>
-        <template v-for="group in sessionGroups" :key="group.label">
-          <h2 class="history-group">{{ group.label }}</h2>
-          <div v-for="item in group.items" :key="item.id" class="history-row" :class="{ selected: activePage === 'chat' && sessionId === item.id }">
+        <p v-else-if="!sessions.length" class="empty-history">{{ search ? '没有匹配的对话。' : '下一段旅程，从新对话开始。' }}</p>
+          <div v-for="item in sessions" :key="item.id" class="history-row" :class="{ selected: activePage === 'chat' && sessionId === item.id }">
             <button class="history-select" :title="item.title" :aria-current="sessionId === item.id && activePage === 'chat' ? 'page' : undefined" :disabled="busy || !!deletingId || !!renamingId" @click="chooseSession(item.id)"><ChatIcon name="chat" /><span>{{ item.title || '新建对话' }}</span></button>
             <button class="icon-button row-more" :aria-label="`${item.title || '新建对话'}：更多操作`" aria-haspopup="menu" :disabled="busy || !!deletingId || !!renamingId" @click="showSessionMenu(item, $event)"><ChatIcon name="more" /></button>
           </div>
-        </template>
         <button v-if="nextCursor" class="load-more" :disabled="listBusy || !!deletingId || !!renamingId" @click="loadSessions(true)">{{ listBusy ? '正在加载…' : '加载更早对话' }}</button>
       </nav>
       <div class="sidebar-bottom">
-        <button v-if="account.role === 'admin'" class="knowledge-entry" :class="{ selected: activePage === 'documents' }" @click="documentsOpened = true; activePage = 'documents'; mobileOpen = false"><ChatIcon name="books" /><span>知识库管理</span><span class="admin-tag">管理</span></button>
-        <button v-if="account.role === 'admin'" class="knowledge-entry" :class="{ selected: activePage === 'usage' }" @click="activePage = 'usage'; mobileOpen = false"><ChatIcon name="books" /><span>调用费用</span><span class="admin-tag">管理</span></button>
         <details class="profile">
           <summary class="account" :aria-label="`${account.username}的账号菜单`"><span class="avatar">{{ account.username.slice(0, 1).toUpperCase() }}</span><span class="account-label"><strong>{{ account.username }}</strong><small>{{ account.role === 'admin' ? '管理员账号' : '个人账号' }}</small></span><ChatIcon name="chevron" /></summary>
-          <div class="profile-menu"><strong>{{ account.username }}</strong><small>{{ account.role === 'admin' ? '管理员 · 共享知识库管理' : '个人账号 · 私人旅行对话' }}</small><button :disabled="busy || authBusy || !!deletingId || !!renamingId" @click="signOut"><ChatIcon name="logout" />退出登录</button></div>
+          <div class="profile-menu"><strong>{{ account.username }}</strong><small>{{ account.role === 'admin' ? '管理员 · 共享知识库管理' : '个人账号 · 私人旅行对话' }}</small><button v-if="account.role === 'admin'" @click="activePage = 'usage'; mobileOpen = false; ($event.currentTarget as HTMLElement).closest('details')?.removeAttribute('open')"><ChatIcon name="chart" />调用费用</button><button :disabled="busy || authBusy || !!deletingId || !!renamingId" @click="signOut"><ChatIcon name="logout" />退出登录</button></div>
         </details>
       </div>
     </aside>
     <main class="workspace">
-      <header class="topbar"><div class="topbar-left"><button class="icon-button expand" aria-label="展开侧栏" @click="collapsed = false; mobileOpen = true"><ChatIcon name="panel" /></button><span class="conversation-title">{{ activePage === 'documents' ? '知识库管理' : activePage === 'usage' ? '调用费用' : currentTitle }}</span></div>
+      <header class="topbar"><div class="topbar-left"><button class="icon-button expand" aria-label="展开侧栏" title="展开侧栏" @click="collapsed = false; mobileOpen = true"><ChatIcon name="panel" /></button><span class="conversation-title">{{ activePage === 'documents' ? '知识库' : activePage === 'usage' ? '调用费用' : activePage === 'space' ? '个人空间' : currentTitle }}</span></div>
         <div v-if="activePage === 'chat' && modelState !== 'configured'" class="service-state" role="status"><span>{{ modelState === 'checking' ? '正在连接…' : '服务暂不可用' }}</span><button v-if="modelState !== 'checking'" @click="checkModel">重新检查</button></div>
         <button v-if="activePage !== 'chat'" class="back-chat" @click="activePage = 'chat'">返回对话 ↗</button>
+        <div v-else class="inspector-actions"><button ref="panelButton" class="top-tab" :class="{ active: inspector === 'status' }" :aria-expanded="inspector === 'status'" aria-controls="workspace-inspector" @click="toggleInspector('status')"><ChatIcon name="status" />状态</button><button class="top-tab" :class="{ active: inspector === 'files' }" :aria-expanded="inspector === 'files'" aria-controls="workspace-inspector" @click="toggleInspector('files')"><ChatIcon name="folder" />文件</button></div>
       </header>
       <a-alert v-if="authError" type="error">{{ authError }}</a-alert>
+      <div ref="workspaceBody" class="workspace-body" :class="{ 'is-resizing': resizing, 'inspector-open': activePage === 'chat' && inspector, 'inspector-overlay': narrowInspector }" :style="{ '--inspector-width': `${displayedInspectorWidth}px` }">
       <section v-show="activePage === 'chat'" class="chat-area" :class="{ 'is-empty': emptyChat }" aria-label="旅行对话">
         <div v-if="emptyChat" class="welcome"><div class="welcome-brand"><img src="/brand/logo-mark.svg" alt="" /><span>TravelMind<em>AI</em></span></div><h1>这次，想去哪里？</h1></div>
         <div v-show="!emptyChat" ref="chatArea" class="messages chat-messages" role="log" aria-label="旅行对话" aria-live="polite"><div v-for="message in visibleMessages" :key="message.id" class="message-row" :class="message.role">
@@ -440,7 +525,7 @@ onBeforeUnmount(() => { window.removeEventListener('travelmind:unauthorized', un
             <img class="message-avatar" src="/brand/logo-mark.svg" alt="" /><div class="message-content">
               <ThinkingProcess :steps="progress" running />
             </div>
-          </div></div>
+          </div><ThinkingProcess v-if="!busy && failedProcess" :steps="failedProcess.steps" :seconds="failedProcess.seconds" interrupted /></div>
 
         <div class="composer-wrap">
           <a-alert v-if="storageWarning" type="warning" class="send-error">{{ storageWarning }}</a-alert>
@@ -467,8 +552,20 @@ onBeforeUnmount(() => { window.removeEventListener('travelmind:unauthorized', un
           <p v-if="!emptyChat" class="composer-note">AI 生成内容仅供参考，请核实出行信息。</p>
         </div>
       </section>
+      <template v-if="activePage === 'chat' && inspector">
+        <button v-if="narrowInspector" class="inspector-scrim" aria-label="关闭右侧面板" @click="closeInspector" />
+        <div v-else class="workspace-divider" role="separator" aria-orientation="vertical" aria-label="调整聊天与右侧面板宽度" aria-controls="workspace-inspector" :aria-valuemin="300" :aria-valuemax="maxInspectorWidth" :aria-valuenow="displayedInspectorWidth" :aria-valuetext="`右侧面板 ${displayedInspectorWidth} 像素`" tabindex="0" title="拖动调整宽度 · 双击恢复默认 · 方向键微调" @pointerdown="startResize" @pointermove="moveResize" @pointerup="endResize" @pointercancel="endResize" @lostpointercapture="endResize" @keydown="resizeWithKeyboard" @dblclick="setInspectorWidth(360)" />
+        <aside id="workspace-inspector" ref="inspectorElement" class="workspace-inspector" :role="narrowInspector ? 'dialog' : 'complementary'" :aria-modal="narrowInspector ? true : undefined" :aria-label="inspector === 'status' ? '当前会话状态' : '当前会话文件'" tabindex="-1" @keydown="onInspectorKeydown">
+          <div class="inspector-heading"><span><ChatIcon :name="inspector === 'status' ? 'status' : 'folder'" />{{ inspector === 'status' ? '会话状态' : '对话文件' }}</span><span><button class="icon-button" :aria-label="inspector === 'status' ? '刷新当前会话状态' : '刷新当前会话文件'" title="刷新" :disabled="!sessionId" @click="refreshKey++"><ChatIcon name="refresh" /></button><button class="icon-button" aria-label="关闭右侧面板" title="关闭面板" @click="closeInspector"><ChatIcon name="close" /></button></span></div>
+          <WorkspaceStatus v-if="inspector === 'status'" :key="`${account.id}:${sessionId}`" :session-id="sessionId" :refresh-key="refreshKey" />
+          <PersonalFilesPanel v-else-if="sessionId" :key="`${account.id}:${sessionId}`" :session-id="sessionId" :refresh-key="refreshKey" @open-session="chooseSession" />
+          <div v-else class="inspector-empty"><ChatIcon name="folder" /><p>还没有对话文件</p><small>添加附件或生成行程后会显示在这里。</small></div>
+        </aside>
+      </template>
+      <section v-if="activePage === 'space'" class="personal-workspace"><PersonalFilesPanel :key="account.id" :refresh-key="refreshKey" @open-session="chooseSession" /></section>
       <section v-if="account.role === 'admin' && activePage === 'usage'" class="documents-workspace"><UsagePanel /></section>
       <section v-if="account.role === 'admin' && documentsOpened" v-show="activePage === 'documents'" class="documents-workspace"><DocumentPanel :active="activePage === 'documents'" /></section>
+      </div>
     </main>
     <div ref="sessionMenu" popover class="floating-menu" aria-label="对话操作"><button @click="menuItem && openRename(menuItem)"><ChatIcon name="edit" />重命名</button><div class="menu-divider" /><button class="danger" @click="menuItem && confirmDelete(menuItem)"><ChatIcon name="trash" />删除对话</button></div>
   </div>

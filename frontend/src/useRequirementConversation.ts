@@ -4,14 +4,14 @@
 import { computed, nextTick, ref } from 'vue'
 import {
   createConversation, deleteSession, readConversation, sendRequirement, stopRequirement, requirementRunning, undoItinerary, modelNames, type ModelProvider,
-  type ChatResponse, type DiningResult, type DiningItem, type PendingMessage, type SavedTurn, type PlanSnapshot, type UndoDraftRequest, type WorkflowSnapshot, type WorkflowResume,
+  type ChatResponse, type DiningResult, type DiningItem, type PendingMessage, type SavedTurn, type PlanSnapshot, type UndoDraftRequest, type WorkflowSnapshot, type WorkflowResume, type ProcessStep, type ProcessSnapshot,
 } from './api/requirements'
 import { ApiError } from './api/http'
 import type { AnswerResult, AttractionCard } from './api/documents'
 import { listAttachments, uploadAttachment, type AttachmentSnapshot, type AttachmentUse } from './api/attachments'
 
 /** 消息类型：气泡只展示自然语言，知识依据由后端保存和校验。 */
-interface ChatMessage { usedProviders?: ModelProvider[]; workflow?: WorkflowSnapshot | null; origin?: string | null; id: string; role: 'user' | 'assistant'; text: string; failed?: boolean; attachments?: AttachmentSnapshot[]; attachmentUse?: AttachmentUse | null; knowledge?: AnswerResult | null; attractions?: AttractionCard[]; restaurants?: DiningItem[]; nearby?: DiningResult | null; clarification?: string | null; itinerary?: PlanSnapshot | null; messageId?: string; process?: { steps: { stage: string; message: string }[]; draft: string; seconds: number; timings?: Record<string, number> } }
+interface ChatMessage { usedProviders?: ModelProvider[]; workflow?: WorkflowSnapshot | null; origin?: string | null; id: string; role: 'user' | 'assistant'; text: string; failed?: boolean; attachments?: AttachmentSnapshot[]; attachmentUse?: AttachmentUse | null; knowledge?: AnswerResult | null; attractions?: AttractionCard[]; restaurants?: DiningItem[]; nearby?: DiningResult | null; clarification?: string | null; itinerary?: PlanSnapshot | null; messageId?: string; process?: ProcessSnapshot | null }
 const legacyStorageKey = 'travelmind.requirement-conversation.v1'
 const welcome = '你好，想去哪里旅行？\n你可以告诉我时间、人数和预算，也可以先问问感兴趣的地方。无法确认的信息，我会直接说明。'
 // 使用服务端安全类别解释切换，不将限流误写为欠费，也不展示供应商异常原文。
@@ -37,7 +37,8 @@ export function useRequirementConversation() {
   const selectedAttachments = ref<AttachmentSnapshot[]>([])
   const uploading = ref(false)
   const draft = ref('')
-  const progress = ref<{ stage: string; message: string }[]>([])
+  const progress = ref<ProcessStep[]>([])
+  const failedProcess = ref<ProcessSnapshot | null>(null)
   const restoring = ref(false)
   const restoreFailed = ref(false)
   const busy = computed(() => sending.value || restoring.value || stopping.value)
@@ -58,7 +59,7 @@ export function useRequirementConversation() {
   let generation = 0
   let storageKey: string | null = null
 
-  /** 清理过程函数：草稿和进度只活在当前页面，不写入历史或浏览器缓存。 */
+  /** 清理过程函数：清空本页临时事件；已完成的公开过程从服务端历史恢复。 */
   function clearStream(): void { draft.value = ''; progress.value = [] }
 
   /** 选择函数：先校验整批文件，再依次上传；会话切换后忽略旧请求结果。 */
@@ -139,7 +140,7 @@ export function useRequirementConversation() {
     // 出发地跟随本轮快照，后续修改城市不能改写旧草稿的标题。
     messages.value.push(
       { id: `${turn.message_id}-user`, role: 'user', text: turn.response.result.original_message, attachments: turn.response.attachments ?? [] },
-      { id: `${turn.message_id}-assistant`, messageId: turn.message_id, role: 'assistant', text: reply, usedProviders: turn.response.used_providers, attachmentUse: turn.response.attachment_use, attachments: turn.response.attachments ?? [], knowledge: turn.response.knowledge, attractions: turn.response.knowledge?.attractions ?? [], restaurants: turn.response.dining?.items ?? [], nearby: turn.response.dining, clarification: turn.response.knowledge?.clarification, itinerary: turn.response.itinerary, workflow: turn.response.workflow, origin: turn.response.result.extraction?.origin ?? null },
+      { id: `${turn.message_id}-assistant`, messageId: turn.message_id, role: 'assistant', text: reply, usedProviders: turn.response.used_providers, attachmentUse: turn.response.attachment_use, attachments: turn.response.attachments ?? [], knowledge: turn.response.knowledge, attractions: turn.response.knowledge?.attractions ?? [], restaurants: turn.response.dining?.items ?? [], nearby: turn.response.dining, clarification: turn.response.knowledge?.clarification, itinerary: turn.response.itinerary, workflow: turn.response.workflow, origin: turn.response.result.extraction?.origin ?? null, process: turn.response.process },
     )
     if (turn.response.status === 'needs_clarification' || turn.response.status === 'complete' || turn.response.workflow?.status === 'cancelled') response.value = turn.response
     else if (response.value) response.value = { ...response.value, changed_fields: [] }
@@ -150,6 +151,7 @@ export function useRequirementConversation() {
   async function reloadConversation(): Promise<void> {
     const token = ++generation
     clearStream()
+    failedProcess.value = null
     const id = sessionId.value
     restoring.value = true
     error.value = ''
@@ -252,6 +254,7 @@ export function useRequirementConversation() {
     const startedAt = Date.now()
     let timings: Record<string, number> | undefined
     clearStream()
+    failedProcess.value = null
     const token = generation
     error.value = ''
     try {
@@ -278,14 +281,18 @@ export function useRequirementConversation() {
         else if (update.event === 'reset') draft.value = ''
         else if (update.event === 'metrics') timings = update.data.stages_seconds
         else if (update.event === 'fallback') progress.value.push({ stage: 'model', message: `${modelNames[update.data.from_alias]} ${fallbackReasons[update.data.reason_category] ?? '暂不可用'}，已切换至 ${modelNames[update.data.to_alias]}` })
-        else progress.value.push(update.data)
+        else {
+          const index = update.data.call_id ? progress.value.findIndex(step => step.call_id === update.data.call_id) : -1
+          if (index >= 0) progress.value[index] = { ...progress.value[index], ...update.data }
+          else progress.value.push(update.data)
+        }
         void scrollToLatest()
       })
       if (token !== generation) return
       messages.value = messages.value.filter(item => item.id !== bubbleId)
       showTurn(turn)
       const assistant = messages.value.at(-1)
-      if (assistant) assistant.process = { steps: [...progress.value], draft: draft.value, seconds: Math.max(1, Math.round((Date.now() - startedAt) / 1000)), timings }
+      if (assistant && !assistant.process && progress.value.length) assistant.process = { steps: [...progress.value], seconds: Math.max(1, Math.round((Date.now() - startedAt) / 1000)), timings }
       pending = null
       remember()
     } catch (cause) {
@@ -307,6 +314,7 @@ export function useRequirementConversation() {
         await recovery
         if (generation === recoveryToken && !restoreFailed.value) error.value = pending?.workflow_resume ? '上次接续仍未确认，请重试上次接续。' : '已恢复最新对话，请核对消息后重新发送。'
       } else {
+        if (progress.value.length) failedProcess.value = { steps: [...progress.value], seconds: Math.max(0, (Date.now() - startedAt) / 1000), timings }
         error.value = cause instanceof Error ? cause.message : '发送失败，请检查网络后重试。'
       }
     } finally {
@@ -331,8 +339,14 @@ export function useRequirementConversation() {
       }
       if (token !== generation) return
       confirmed = true
+      const stoppedProcess = failedProcess.value ?? { steps: [...progress.value], seconds: 0 }
       await reloadConversation()
       if (sessionId.value !== id) return
+      if (!messages.value.some(item => item.messageId === messageId) && stoppedProcess.steps.length) {
+        failedProcess.value = { ...stoppedProcess, steps: [...stoppedProcess.steps.map(step => ({ ...step,
+          status: step.status === 'running' ? 'cancelled' as const : step.status,
+        })), { stage: 'cancelled', message: '服务已确认停止本次生成。', status: 'cancelled' }] }
+      }
       if (pending && !pending.workflow_resume) { pending = null; remember() }
       selectedProvider.value = provider
       error.value = pending?.workflow_resume ? '接续已停止，可重试上次接续。' : '生成已停止，可选择模型后重新发送。'
@@ -390,6 +404,7 @@ export function useRequirementConversation() {
 
   /** 新建会话由后端先保存空记录；切换时丢弃旧对话的未发送输入。 */
   function openEmpty(id: string): void {
+    failedProcess.value = null
     selectedProvider.value = 'deepseek'
     ++generation
     clearStream()
@@ -427,6 +442,7 @@ export function useRequirementConversation() {
 
   /** 清空函数：销毁可见数据并阻止旧请求回写；删除当前会话时保留账号存储键。 */
   function clearConversation(clearAccount = true): void {
+    failedProcess.value = null
     selectedProvider.value = 'deepseek'
     ++generation
     clearStream()
@@ -452,7 +468,7 @@ export function useRequirementConversation() {
   }
 
   return {
-    messages, input, selectedProvider, response, sessionId, revision, busy, stopping, canStop, stop, restoring, restoreFailed, draft, progress,
+    messages, input, selectedProvider, response, sessionId, revision, busy, stopping, canStop, stop, restoring, restoreFailed, draft, progress, failedProcess,
     error, storageWarning, chatArea, initialize, reloadConversation, send, undoDraft, undoTarget, pendingUndo,
     openEmpty, selectConversation, clearConversation, deleteConversation,
     selectedAttachments, uploading, addAttachments, removeAttachment,

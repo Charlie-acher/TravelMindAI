@@ -94,6 +94,8 @@ def test_migration_round_trip_matches_models(migrated_database: tuple[Connection
 def test_chat_migration_preserves_existing_session(
     migrated_database: tuple[Connection, Config],
 ) -> None:
+    from sqlalchemy import select
+
     from app.models.trip import TravelSession
 
     connection, config = migrated_database
@@ -107,8 +109,10 @@ def test_chat_migration_preserves_existing_session(
     connection.commit()
     command.upgrade(config, "0009_document_categories")
     with Session(connection) as reader:
-        assert reader.get(TravelSession, session_id).title == "升级前已有的会话"
-        assert reader.get(TravelSession, session_id).user_id is None
+        row = reader.execute(select(TravelSession.title, TravelSession.user_id).where(
+            TravelSession.id == session_id)).one()
+        assert row.title == "升级前已有的会话"
+        assert row.user_id is None
     assert "requirement_turns" in inspect(connection).get_table_names()
     connection.commit()
     with pytest.raises(RuntimeError, match="未认领"):

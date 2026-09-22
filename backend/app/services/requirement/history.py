@@ -12,8 +12,9 @@ from app.models.requirement_turn import RequirementTurn
 from app.models.trip import Itinerary, TravelRequest, TravelSession
 from app.schemas.itinerary import PlanSnapshot, TravelPlan, UndoDraftRequest
 from app.schemas.requirement.base import TravelRequestExtraction
-from app.schemas.requirement.chat import RequirementChatResponse
+from app.schemas.requirement.chat import ProcessSnapshot, RequirementChatResponse
 from app.schemas.requirement.history import RequirementHistory, SavedRequirementTurn
+from app.services.chat.metrics import active_metrics
 from app.services.requirement.extract import build_result
 from app.services.requirement.merge import LIST_FIELDS, SCALAR_FIELDS
 from app.services.trip_service import SessionNotFoundError, save_draft_in_transaction
@@ -237,6 +238,9 @@ class RequirementHistoryService:
                     ),
                     can_undo=old_plan is not None,
                 )})
+            if (metrics := active_metrics.get()) is not None:
+                response = response.model_copy(update={"process":
+                    ProcessSnapshot.model_validate(metrics.process_snapshot())})
             row = RequirementTurn(
                 session_id=session_id,
                 message_id=message_id,
@@ -244,8 +248,8 @@ class RequirementHistoryService:
                 response_json=response.model_dump(mode="json"),
             )
             unit.add(row)
-            # 首次成功消息与标题一起提交，不额外调用模型；失败不修改标题。
-            if revision == 0 and trip.title in {"新建对话", "旅行需求对话"}:
+            # 先保存可用的原话回退标题，事务提交后再总结；手动名称不覆盖。
+            if revision == 0 and trip.title_source == "pending":
                 title = response.result.original_message or (
                     response.attachments[0].file_name if response.attachments else trip.title)
                 trip.title = " ".join(title.split())[:40]

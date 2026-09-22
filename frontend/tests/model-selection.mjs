@@ -73,6 +73,7 @@ try {
   assert.equal(stopped.busy.value, false)
   assert.equal(stopped.input.value, stoppedRequest.message)
   assert.equal(stopped.selectedProvider.value, 'qwen')
+  assert.ok(stopped.failedProcess.value?.steps.some(step => step.status === 'cancelled'), '服务确认停止后保留本页取消状态')
   const stoppedId = stoppedRequest.message_id
   stopped.selectedProvider.value = 'kimi'
   globalThis.fetch = async (url, init) => {

@@ -3,8 +3,11 @@
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
+from functools import wraps
 from threading import Event
-from typing import Any
+from time import perf_counter
+from typing import Any, ParamSpec, TypeVar
+from uuid import uuid4
 
 from pydantic_core import from_json
 
@@ -16,6 +19,57 @@ event_sink: ContextVar[EventSink | None] = ContextVar("chat_event_sink", default
 answer_sources: ContextVar[set[int] | None] = ContextVar("chat_answer_sources", default=None)
 request_cancelled: ContextVar[Event | None] = ContextVar("chat_cancelled", default=None)
 research_tasks: ContextVar[list[dict[str, Any]] | None] = ContextVar("research_tasks", default=None)
+P = ParamSpec("P")
+T = TypeVar("T")
+
+
+"""工具记录函数：只公开工具名称和执行结果，不发送参数、异常正文或模型内部推理。"""
+
+@contextmanager
+def tool_progress(stage: str, name: str) -> Iterator[dict[str, str]]:
+    call_id, started = str(uuid4()), perf_counter()
+    emit("progress", stage=stage, message=name, call_id=call_id, status="running")
+    outcome = {"status": "completed"}
+    try:
+        yield outcome
+    except ChatCancelled:
+        outcome["status"] = "cancelled"
+        raise
+    except Exception:
+        outcome["status"] = "failed"
+        raise
+    finally:
+        data: dict[str, object] = {"stage": stage, "message": name, "call_id": call_id,
+            "status": outcome["status"], "elapsed_seconds": round(perf_counter() - started, 3)}
+        if outcome.get("summary"):
+            data["summary"] = outcome["summary"]
+        # 结束记录必须能在取消后发布，且不再次抛取消异常覆盖原有结果。
+        if (metrics := active_metrics.get()) is not None:
+            metrics.observe("progress", data)
+        if (sink := event_sink.get()) is not None:
+            sink("progress", data)
+
+
+"""工具装饰函数：在原调用边界记录开始和结束，保留函数签名及异常行为。"""
+
+def traced_tool(stage: str, name: str, summarize: Callable[[Any], str] | None = None
+                ) -> Callable[[Callable[P, T]], Callable[P, T]]:
+    """装饰函数：绑定公开名称，不暴露函数参数。"""
+
+    def decorate(function: Callable[P, T]) -> Callable[P, T]:
+        """执行函数：复用原调用返回值，计时仅覆盖真实执行。"""
+
+        @wraps(function)
+        def wrapped(*args: P.args, **kwargs: P.kwargs) -> T:
+            with tool_progress(stage, name) as outcome:
+                result = function(*args, **kwargs)
+                if getattr(result, "status", None) in {"error", "unavailable", "unconfigured"}:
+                    outcome["status"] = "failed"
+                if summarize is not None:
+                    outcome["summary"] = summarize(result)
+                return result
+        return wrapped
+    return decorate
 
 
 class ChatCancelled(RuntimeError):

@@ -16,7 +16,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import Engine
 
 from app.api.attachments import get_attachment_service
-from app.api.auth import require_session_owner
+from app.api.auth import CurrentUser, require_session_owner
 from app.api.document.dependencies import get_search_service
 from app.llm.gateway_client import GatewayClient
 from app.llm.vision import QwenVisionClient
@@ -34,6 +34,8 @@ from app.services.chat.metrics import measure_run
 from app.services.chat.workflow import run_saved_workflow
 from app.services.requirement.extract import ModelClient
 from app.services.requirement.history import RequirementHistoryService
+from app.services.session_titles import summarize_session_title
+from app.services.usage import session_usage
 from app.services.web_search import WebSearchClient
 
 router = APIRouter(prefix="/sessions", tags=["旅行需求对话"],
@@ -108,12 +110,14 @@ def send_saved_message(
     request: Request,
     model: ModelDependency,
     service: HistoryDependency,
+    user: CurrentUser,
 ) -> SavedRequirementTurn:
     if service is None:
         raise HTTPException(503, "未启用数据库，请配置 TRAVELMIND_DATABASE_URL 后重启服务")
-    with measure_run(request.state.request_id), httpx.Client() as map_http, BaiduMaps(
+    with session_usage(user.id, session_id, payload.message_id), \
+            measure_run(request.state.request_id), httpx.Client() as map_http, BaiduMaps(
             request.app.state.settings) as maps:
-        return run_saved_workflow(
+        turn = run_saved_workflow(
             session_id, payload, model, service, request.state.request_id,
             lambda: contextmanager(get_search_service)(request),
             maps,
@@ -130,6 +134,8 @@ def send_saved_message(
                     if request.app.state.settings.mineru_base_url else None)
                 if payload.attachment_ids else None,
         )
+        summarize_session_title(request.app.state.database_engine, session_id, turn, model)
+        return turn
 
 
 """流式发送函数：鉴权后立即返回 SSE，工作线程独立持有模型和检索连接。"""
@@ -137,7 +143,7 @@ def send_saved_message(
 @router.post("/{session_id}/requirement-messages/stream")
 async def stream_saved_message(
     session_id: UUID, payload: SavedRequirementMessage, request: Request,
-    service: HistoryDependency,
+    service: HistoryDependency, user: CurrentUser,
 ) -> StreamingResponse:
     if service is None:
         raise HTTPException(503, "未启用数据库，请配置 TRAVELMIND_DATABASE_URL 后重启服务")
@@ -164,8 +170,9 @@ async def stream_saved_message(
         cancellation_token = request_cancelled.set(cancelled)
         try:
             settings = request.app.state.settings
-            with measure_run(request.state.request_id, notify), httpx.Client() as http, BaiduMaps(
-                    settings) as maps:
+            with session_usage(user.id, session_id, payload.message_id), \
+                    measure_run(request.state.request_id, notify), \
+                    httpx.Client() as http, BaiduMaps(settings) as maps:
                 model = GatewayClient(settings, http, request.app.state.model_gateway,
                                       selected_provider=payload.selected_provider)
                 turn = run_saved_workflow(
@@ -181,6 +188,7 @@ async def stream_saved_message(
                             settings.mineru_timeout_seconds) if settings.mineru_base_url else None)
                         if payload.attachment_ids else None,
                 )
+                summarize_session_title(request.app.state.database_engine, session_id, turn, model)
             loop.call_soon_threadsafe(enqueue, "done", turn.model_dump(mode="json"))
         except ChatCancelled:
             loop.call_soon_threadsafe(enqueue, "cancelled", None)

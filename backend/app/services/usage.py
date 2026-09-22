@@ -2,14 +2,14 @@
 
 import re
 from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from contextvars import ContextVar
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from time import perf_counter
 from typing import Any, cast
 from urllib.parse import urlsplit
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from app.llm.contracts import ProviderError
 
@@ -23,6 +23,31 @@ RATES = {
 active_usage: ContextVar[tuple[str, Callable[[dict[str, Any]], None]] | None] = ContextVar(
     "usage_sink", default=None)
 active_call: ContextVar[dict[str, Any] | None] = ContextVar("usage_call", default=None)
+session_usage_context: ContextVar[dict[str, str]] = ContextVar("session_usage", default={})
+
+
+"""会话记账函数：归属取自登录账号和已鉴权路由，不信任模型输出。"""
+
+@contextmanager
+def session_usage(user_id: UUID, session_id: UUID, message_id: UUID,
+                  *, purpose: str = "conversation") -> Iterator[None]:
+    token = session_usage_context.set({"user_id": str(user_id), "session_id": str(session_id),
+                                      "message_id": str(message_id), "purpose": purpose})
+    try:
+        yield
+    finally:
+        session_usage_context.reset(token)
+
+
+"""用途范围函数：标题和压缩摘要计入总量，但不替代对话的最近上下文。"""
+
+@contextmanager
+def usage_purpose(purpose: str) -> Iterator[None]:
+    token = session_usage_context.set({**session_usage_context.get(), "purpose": purpose})
+    try:
+        yield
+    finally:
+        session_usage_context.reset(token)
 
 
 """用量整理函数：兼容LangChain与提供方原始字段，缓存输入是总输入的子集。"""
@@ -140,6 +165,7 @@ def usage_call(provider: str, model: str, endpoint: str, kind: str) -> Iterator[
         "input_tokens": None, "output_tokens": None, "total_tokens": None,
         "cache_read_tokens": None, "units": None}
     call["state"] = "running"
+    call.update(session_usage_context.get())
     call["cost"] = {"amount": None, "currency": None, "status": "unknown",
                     "rate_version": VERSION, "source": None, "reason": "调用尚未结束"}
     scope = active_usage.get()
@@ -149,7 +175,10 @@ def usage_call(provider: str, model: str, endpoint: str, kind: str) -> Iterator[
     start = perf_counter()
     token = active_call.set(call)
     try:
-        yield call
+        from app.services.chat.events import tool_progress
+        names = {"ocr": "解析附件"}
+        with tool_progress(kind, names[kind]) if kind in names else nullcontext():
+            yield call
         call["success"] = True
     except Exception as error:
         # 仅保存类别与HTTP状态，不把异常正文中的账户、密钥或用户内容入账。

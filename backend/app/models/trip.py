@@ -30,6 +30,8 @@ class TravelSession(Base):
     __tablename__ = "sessions"  # 数据库中的实际表名。
     __table_args__ = (
         CheckConstraint("status IN ('active', 'archived')", name="ck_sessions_status"),
+        CheckConstraint("title_source IN ('pending', 'generating', 'auto', 'manual', 'fallback')",
+                        name="ck_sessions_title_source"),
         Index("ix_sessions_user_updated", "user_id", "updated_at", "id"),
     )
 
@@ -41,6 +43,8 @@ class TravelSession(Base):
     thread_id: Mapped[UUID] = mapped_column(default=uuid4, unique=True)
     # 会话标题，例如“杭州三日游”，最多200个字符。
     title: Mapped[str] = mapped_column(String(200))
+    # 手动标题优先；自动摘要只认领待生成的新会话。
+    title_source: Mapped[str] = mapped_column(String(20), server_default="manual")
     # active 表示使用中，archived 表示归档；数据库也检查允许值。
     status: Mapped[str] = mapped_column(String(20), server_default="active")
     # 由数据库记录创建时刻，带时区；避免不同客户端时钟各自生成时间。

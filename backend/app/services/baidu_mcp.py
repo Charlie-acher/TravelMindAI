@@ -21,7 +21,7 @@ from langchain_core.tools import BaseTool, ToolException
 
 from app.config import Settings
 from app.schemas.map_tools import MapToolEvidence
-from app.services.chat.events import progress
+from app.services.chat.events import progress, traced_tool
 from app.services.usage import usage_call
 
 if TYPE_CHECKING:
@@ -122,6 +122,7 @@ class BaiduMCPClient:
 
         """同步执行函数：当前请求最多24次地图调用，包含商户详情补查。"""
 
+        @traced_tool("map", f"百度地图{READ_TOOLS[tool.name]}")
         def execute(**arguments: Any) -> tuple[str, None]:
             if bundle.calls >= 24:
                 raise ToolException("本轮百度查询已达上限，请根据已有依据回答或说明未能查到。")
