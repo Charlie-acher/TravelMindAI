@@ -6,11 +6,12 @@ from app.models.document import DocumentChunkRecord, DocumentRecord
 from app.models.document_job import DocumentJobRecord
 from app.models.requirement_turn import RequirementTurn
 from app.models.trip import Base, Itinerary, TravelRequest, TravelSession
+from app.models.usage import UsageEvent
 from app.models.workflow import ChatWorkflow
 
 # 导入资料和片段模型后，迁移工具Alembic才能把这两张表也纳入结构检查。
 __all__ = [
     "Base", "Itinerary", "TravelRequest", "TravelSession", "RequirementTurn", "DocumentRecord",
     "DocumentChunkRecord", "DocumentJobRecord", "User", "AuthSession", "ConversationAttachment",
-    "ChatWorkflow",
+    "ChatWorkflow", "UsageEvent",
 ]

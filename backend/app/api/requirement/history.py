@@ -30,6 +30,7 @@ from app.services.attachment.mineru import MinerUClient
 from app.services.attachment.reader import AttachmentReader
 from app.services.baidu import BaiduMaps
 from app.services.chat.events import ChatCancelled, event_sink, request_cancelled
+from app.services.chat.metrics import measure_run
 from app.services.chat.workflow import run_saved_workflow
 from app.services.requirement.extract import ModelClient
 from app.services.requirement.history import RequirementHistoryService
@@ -110,7 +111,8 @@ def send_saved_message(
 ) -> SavedRequirementTurn:
     if service is None:
         raise HTTPException(503, "未启用数据库，请配置 TRAVELMIND_DATABASE_URL 后重启服务")
-    with httpx.Client() as map_http, BaiduMaps(request.app.state.settings) as maps:
+    with measure_run(request.state.request_id), httpx.Client() as map_http, BaiduMaps(
+            request.app.state.settings) as maps:
         return run_saved_workflow(
             session_id, payload, model, service, request.state.request_id,
             lambda: contextmanager(get_search_service)(request),
@@ -162,7 +164,8 @@ async def stream_saved_message(
         cancellation_token = request_cancelled.set(cancelled)
         try:
             settings = request.app.state.settings
-            with httpx.Client() as http, BaiduMaps(settings) as maps:
+            with measure_run(request.state.request_id, notify), httpx.Client() as http, BaiduMaps(
+                    settings) as maps:
                 model = GatewayClient(settings, http, request.app.state.model_gateway,
                                       selected_provider=payload.selected_provider)
                 turn = run_saved_workflow(
@@ -178,7 +181,7 @@ async def stream_saved_message(
                             settings.mineru_timeout_seconds) if settings.mineru_base_url else None)
                         if payload.attachment_ids else None,
                 )
-                loop.call_soon_threadsafe(enqueue, "done", turn.model_dump(mode="json"))
+            loop.call_soon_threadsafe(enqueue, "done", turn.model_dump(mode="json"))
         except ChatCancelled:
             loop.call_soon_threadsafe(enqueue, "cancelled", None)
         except Exception as error:

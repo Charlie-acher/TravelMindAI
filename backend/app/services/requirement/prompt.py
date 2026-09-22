@@ -24,6 +24,9 @@ intent：想旅行/先帮梳理条件=plan_trip，明确修改/回答之前的�
 当前结构化行程卡片只支持单目的地2～5天1～8人，超范围字段留null、intent=other，
 但旅行问题仍须填写query_cities和retrieval_query，用chat结合资料回答，不能跳过检索。
 total_budget仅全团人民币预算，金额字符串；餐饮人均、酒店房价不能填成整趟预算。
+“希望少走路、节奏舒适、带爸妈轻松玩”是偏好，pace=relaxed，少走路等写interests，
+不放入hard_constraints；旧记录中同类误存条目应移到偏好。明确全程无障碍、不能爬山、
+每天步行不超过某个时长等仍保留硬条件，不能把明确限制降为偏好。
 日期YYYY-MM-DD，天数包含首尾两天。未知日期不猜，明确清除用clear_fields；删除偏好
 用remove_items并复制已确认条件原文，不能顺带取消其他限制。
 destination_action仅表示旅行意愿：keep保留，set明确想去/改去且update.destination有效，
@@ -40,6 +43,28 @@ retrieval_category按本轮知识需求填写景点、餐馆、住宿之一；�
 “给我做一份攻略”“安排三天怎么玩”都要求生成草稿，用plan，条件缺少仍用plan集中补问。
 紧接规划缺项补问的“一个人、4000元”等是继续同一份草稿，用plan；不要变成普通chat。
 规划同时要求天气/交通时先plan；单独追问天气或某两点怎么走才map。
+单独查高铁/动车/机票的班次、票价、往返比较或修改交通时段，填写transport_query并用chat，
+不能当成完整行程修改或交给市内地图工具。普通市内公交/驾车路线仍用map。
+transport_query结合已确认条件、最近交通查询和用户纠正补齐origin、destination、
+departure_date、return_date、travelers；没说往返且历史没有往返要求，return_date=null。
+明确只查高铁时modes=["rail"]，只查机票=["flight"]，比较两种则两项；未知日期/城市留null。
+earliest_departure/latest_arrival用HH:MM，只有明确时间才设硬筛选；“别太早”写preferences，
+不要擅自当成07:00；“晚上十一点以前到”填23:00。上下文的同类时段要求可接续。
+earliest_departure/latest_arrival仅表示去程；return_earliest_departure/return_latest_arrival
+仅表示返程。往返共用要求必须同时填两组；解除某程限制时只把对应字段设null。
+仅修改返程不能改去程时段，返程无限制就留null，不能自动继承去程限制。
+例如“22日去24日回，7点后出发、23点前到”是往返共同要求：去程和返程的最早出发
+都填07:00、最晚到达都填23:00；只有明确“去程7点后，回程不限”才将返程两项填null。
+接续“返程晚一点、只看飞机、换成9月24日”等也填写完整交通查询，保留其他已知查询条件。
+有last_transport_query且当前是接续修改/继续查询时transport_continue=true；
+程序会保留未提及的旧交通字段，transport_query里的null不用于清除。
+明确“返程不限制几点到”时transport_clear_fields=["return_latest_arrival"]；
+“改为单程不查回程”清除return_date；只有用户明确取消的字段才放入清除列表。
+新的独立路线查询用transport_continue=false，不能把旧交通条件强加给新问题。
+当前日期以最新用户消息上下文提供的current_date为准；未写年份取最近未来日期，不查过去。
+交通查询不要求总预算、游玩天数或景点，不能重复问已有城市/日期。
+单独咨询其他城市的票价不改变原旅行目的地；transport_query仅是查询范围。
+不涉及交通购票信息时transport_query=null；完整逐日规划仍走plan，不因提到交通就切走。
 问特色菜等知识用chat；餐馆后的价格、口味、第一家附近等接续也用map。
 有完整旅行条件但只问景点/知识仍用chat，不能自动生成行程。
 例：计划苏州后问杭州景点：destination_action=keep，query_cities=["杭州"]，
@@ -108,6 +133,8 @@ def build_requirement_prompt(reference_date: date) -> str:
     5. “轻松一点”对应relaxed，“正常节奏”对应balanced，“尽量排满”对应intensive；
        没有说明节奏时为null。不要擅自添加兴趣、住宿或饮食偏好。
     6. 明确必须遵守的条件放hard_constraints；明确不要的地点或活动放excluded_items。
+       “希望少走路、节奏舒适”属于偏好：pace=relaxed，具体偏好写interests，不是硬条件。
+       全程无障碍、不能爬山、步行不得超过明确分钟数等才保留对应硬限制。
        对修改类请求仅提取最新消息给出的新信息；程序会合并历史，不能抄写未修改旧值。
     7. 同一句中有明确更正时采用更正后的值；无法判断取哪个值时填null并说明冲突。
     8. 有上一轮需求时，“三天、两个人、五千元”等回答也是modify_trip。

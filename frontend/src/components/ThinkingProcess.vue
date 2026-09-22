@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /** 过程展示层：默认以呼吸灯长条展示最新步骤，按需展开真实过程。 */
-defineProps<{ steps: { stage: string; message: string }[]; running?: boolean; seconds?: number }>()
+defineProps<{ steps: { stage: string; message: string }[]; running?: boolean; seconds?: number; timings?: Record<string, number> }>()
 </script>
 
 <template>
@@ -11,7 +11,7 @@ defineProps<{ steps: { stage: string; message: string }[]; running?: boolean; se
       <span class="progress-toggle">查看过程</span>
     </summary>
     <div class="process-content">
-      <ol v-if="steps.length"><li v-for="(step, index) in steps" :key="index" :class="{ current: running && index === steps.length - 1 }">{{ step.message }}</li></ol>
+      <ol v-if="steps.length"><li v-for="(step, index) in steps" :key="index" :class="{ current: running && index === steps.length - 1 }">{{ step.message }}<span v-if="timings?.[step.stage] !== undefined && steps.findIndex(item => item.stage === step.stage) === index">（累计 {{ timings[step.stage]!.toFixed(1) }} 秒）</span></li></ol>
       <p v-else>正在连接旅行助手…</p>
     </div>
   </details>

@@ -7,6 +7,7 @@ import httpx
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.config import Settings
+from app.services.usage import token_usage, usage_call
 
 
 class EmbeddingError(RuntimeError):
@@ -22,7 +23,7 @@ class _EmbeddingItem(BaseModel):
 
 
 class _EmbeddingResponse(BaseModel):
-    """响应检查类：读取本次模型名和向量，忽略本步未使用的计费等字段。"""
+    """响应检查类：读取本次模型名和向量，用量已由调用账本单独保存。"""
 
     model_config = ConfigDict(strict=True)
     model: str
@@ -77,14 +78,21 @@ class EmbeddingClient:
         if not 1 <= len(texts) <= 8 or any(not text.strip() or len(text) > 800 for text in texts):
             raise EmbeddingError("每次需提供1至8段非空文字，每段最多800个字符")
         try:
-            response = self._http.post(
-                self._url,
-                headers={"Authorization": f"Bearer {self._key.get_secret_value()}"},
-                json={"model": self._model, "input": texts, "encoding_format": "float"},
-                timeout=self._timeout,
-                follow_redirects=False,  # 配置地址有误时直接提示，不跟随跳转发送资料。
-            )
-            response.raise_for_status()
+            with usage_call("qwen" if self._provider == "aliyun" else self._provider,
+                            self._model, self._url, "embedding") as call:
+                response = self._http.post(
+                    self._url,
+                    headers={"Authorization": f"Bearer {self._key.get_secret_value()}"},
+                    json={"model": self._model, "input": texts, "encoding_format": "float"},
+                    timeout=self._timeout,
+                    follow_redirects=False,  # 配置地址有误时直接提示，不跟随跳转发送资料。
+                )
+                response.raise_for_status()
+                try:
+                    body = response.json()
+                    call.update(token_usage(body.get("usage") if isinstance(body, dict) else None))
+                except ValueError:
+                    pass  # 原有响应校验负责报错，费用未知不覆盖原异常。
         except httpx.TimeoutException:
             raise EmbeddingError("Embedding请求超时，请稍后重试") from None
         except httpx.HTTPStatusError as error:

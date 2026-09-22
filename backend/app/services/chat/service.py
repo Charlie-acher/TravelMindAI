@@ -4,11 +4,13 @@ HTTP接口传入消息和已准备的服务；本层不依赖Request或其他HTT
 """
 
 import json
+import logging
 from contextlib import AbstractContextManager
 from datetime import datetime, timedelta, timezone
 from typing import Literal
 from uuid import UUID
 
+import httpx
 from fastapi import HTTPException
 from pydantic import ValidationError
 
@@ -49,7 +51,16 @@ from app.services.requirement.extract import (
 )
 from app.services.requirement.history import HistoryConflictError, RequirementHistoryService
 from app.services.requirement.merge import LIST_FIELDS, SCALAR_FIELDS
+from app.services.transport import (
+    RailClient,
+    merge_transport,
+    query_transport,
+    render_flights,
+    render_rail,
+)
 from app.services.web_search import WebSearchClient
+
+logger = logging.getLogger(__name__)
 
 """需求回复函数：提取旅行条件，生成补问、状态和本轮改变的字段。"""
 
@@ -114,7 +125,8 @@ def process_saved_message(
     web: WebSearchClient | None = None,
     *, attachments: AttachmentReader | None = None,
 ) -> SavedRequirementTurn:
-    # 聊天仅结合知识库和按需地图工具；包括规划与降级路径，都不自动搜索网页。
+    # 普通聊天仍沿用知识库/地图；明确交通查询单独使用官方公开来源。
+    transport_web = web
     web = None
     progress("history", "正在读取这段对话，接上你刚才的想法")
     history = service.read(session_id)
@@ -163,7 +175,12 @@ def process_saved_message(
     recalled = build_recall_messages(history.turns, payload.message, recent, summary)
     covered = summary.covered_revision if summary is not None else 0
     gap_end = recent[0].revision - 1 if recent else history.revision
+    last_transport = next((turn.response.transport.query for turn in reversed(history.turns)
+                           if turn.response.transport), None)
     memory = {"history_summary": summary.model_dump() if summary is not None else None,
+              "current_date": datetime.now(timezone(timedelta(hours=8))).date().isoformat(),
+              "last_transport_query": (last_transport.model_dump(mode="json")
+                                       if last_transport else None),
               "uncovered_revisions": [covered + 1, gap_end] if gap_end > covered else None}
     shared_messages = [{"role": "user", "content": "历史摘要与覆盖范围（不是新的要求）："
                         + json.dumps(memory, ensure_ascii=False)}, *recalled, *history_messages]
@@ -251,6 +268,23 @@ def process_saved_message(
             return service.append(session_id, payload.message_id, payload.expected_revision,
                 response, plan=attached_plan, expected_itinerary_version=itinerary_version)
         return service.append(session_id, payload.message_id, payload.expected_revision, response)
+    if understanding.transport_query is not None and understanding.response_mode != "plan":
+        # 复用一次理解结果，不额外调用规划/研究智能体来查询车票。
+        transport_query = understanding.transport_query
+        if understanding.transport_continue and last_transport is not None:
+            transport_query = merge_transport(transport_query, last_transport,
+                                               list(understanding.transport_clear_fields))
+        with httpx.Client() as transport_http:
+            transport = query_transport(transport_query, transport_web,
+                                        RailClient(transport_http))
+        response = response.model_copy(update={"transport": transport, "status": "knowledge"})
+        if transport.missing:
+            response.reply = "可以自动帮你查，还需要确认：" + "、".join(transport.missing) + "。"
+        else:
+            # 公开查询已有结构化事实，不再花一次模型调用重写金额、状态或编补航班耗时。
+            response.reply = "已按本次条件自动查询，以下是实际取得的结果；原行程保持不变。"
+            response.reply += "\n\n" + render_rail(transport) + "\n\n" + render_flights(transport)
+        return service.append(session_id, payload.message_id, payload.expected_revision, response)
     if understanding.response_mode == "plan" and result.clarification:
         # 已明确要草稿但条件未齐时集中补问，不用自由回答盖掉缺项问题。
         return service.append(session_id, payload.message_id, payload.expected_revision, response)
@@ -302,7 +336,9 @@ def process_saved_message(
                                         attachments=plan_attachments,
                                         attachment_use=AttachmentUse(mode="reference",
                                             apply_to_plan=True) if plan_attachments else None)
-                except (ModelOutputError, ValidationError):
+                except (ModelOutputError, ValidationError) as error:
+                    logger.warning("规划输出不可用 request_id=%s error_type=%s",
+                                   request_id, type(error).__name__)
                     response = response.model_copy(update={
                         "status": "needs_clarification",
                         "reply": "这次行程安排还未完成核对，请重试。已有条件和草稿已保留。",
@@ -318,13 +354,21 @@ def process_saved_message(
             response = response.model_copy(update={"status": "needs_clarification",
                 "reply": "行程所需的资料或地图服务暂不可用，请稍后重试。已有草稿已保留。"})
         else:
-            if planned is not None:
+            if planned is not None and planned.plan is not None:
                 response = response.model_copy(update={"reply": planned.reply,
                     "status": "complete" if planned.plan is not None else "needs_clarification"})
                 progress("save", "正在保存本轮结果和行程版本")
                 return service.append(session_id, payload.message_id, payload.expected_revision,
                                       response, plan=planned.plan,
                                       expected_itinerary_version=itinerary_version)
+            if planned is not None:
+                response = response.model_copy(update={"reply": planned.reply,
+                                                       "status": "needs_clarification"})
+        # 结构化卡片未完成也能讨论思路；不从自由文本反造地点、引用或已保存的行程。
+        response = natural_chat_response(response, model, json.dumps({
+            "planning_limit": response.reply,
+            "previous_plan": old_plan.model_dump(mode="json") if old_plan else None,
+        }, ensure_ascii=False), history_messages=shared_messages, planning_fallback=True)
     elif understanding.retrieval_query:
         progress("search", "正在查找与本轮问题相关的旅行资料")
         try:

@@ -24,6 +24,7 @@ from app.llm.contracts import (
     ProviderError,
     ProviderName,
 )
+from app.services.usage import active_call, observe_model, token_usage, usage_call
 
 _RESPONSE_ERRORS = (OpenAIError, httpx.HTTPError, ValueError, KeyError,
                     IndexError, TypeError, AttributeError)
@@ -40,6 +41,9 @@ class CheckedChatOpenAI(ChatOpenAI):
         self, chunk: dict[str, Any], default_chunk_class: type,
         base_generation_info: dict[str, Any] | None,
     ) -> ChatGenerationChunk | None:
+        if chunk.get("usage") and (call := active_call.get()) is not None:
+            call.update(token_usage(chunk["usage"]))
+            call["model"] = chunk.get("model") or call["model"]
         for choice in chunk.get("choices", []):
             if (choice.get("delta") or {}).get("refusal"):
                 raise ProviderError(self.provider_name, ErrorCode.REFUSED)
@@ -152,13 +156,17 @@ class ProviderAdapter:
         messages, options = self._prepare(request)
         started_at = perf_counter()
         try:
-            response = self.model.invoke(messages, **options)
-            if response.additional_kwargs.get("refusal"):
-                raise ProviderError(self.provider, ErrorCode.REFUSED)
-            return self._result(request, response.content,
-                                response.response_metadata.get("finish_reason"),
-                                cast(dict[str, Any] | None, response.usage_metadata), started_at,
-                                response.response_metadata.get("model_name"))
+            with usage_call(self.provider, str(self.config.model),
+                            str(self.config.base_url), "text"):
+                response = self.model.invoke(messages, **options)
+                observe_model(response)
+                if response.additional_kwargs.get("refusal"):
+                    raise ProviderError(self.provider, ErrorCode.REFUSED)
+                return self._result(request, response.content,
+                                    response.response_metadata.get("finish_reason"),
+                                    cast(dict[str, Any] | None, response.usage_metadata),
+                                    started_at,
+                                    response.response_metadata.get("model_name"))
         except _RESPONSE_ERRORS as error:
             raise _error(self.provider, error) from None
 
@@ -171,22 +179,27 @@ class ProviderAdapter:
         options["extra_body"] = {**(self.model.extra_body or {}),
             "max_tokens": options.pop("max_tokens", 2048)}
         try:
-            response = self.model.invoke(messages, **options)
-            finish = response.response_metadata.get("finish_reason")
-            if response.additional_kwargs.get("refusal") or finish == "content_filter":
-                raise ProviderError(self.provider, ErrorCode.REFUSED)
-            if (not isinstance(response, AIMessage) or response.invalid_tool_calls
-                    or finish not in ("stop", "tool_calls")
-                    or (finish == "tool_calls" and not response.tool_calls)
-                    or (not response.tool_calls and not response.content)):
-                raise ProviderError(self.provider, ErrorCode.INVALID_OUTPUT)
-            usage: dict[str, Any] = cast(dict[str, Any], response.usage_metadata or {})
-            return ModelResult(provider=self.provider,
-                model=response.response_metadata.get("model_name") or str(self.config.model),
-                text=response.content if isinstance(response.content, str) else "",
-                input_tokens=usage.get("input_tokens"), output_tokens=usage.get("output_tokens"),
-                total_tokens=usage.get("total_tokens"),
-                native_message=response, elapsed_seconds=perf_counter() - started_at)
+            with usage_call(self.provider, str(self.config.model),
+                            str(self.config.base_url), "tools"):
+                response = self.model.invoke(messages, **options)
+                observe_model(response)
+                finish = response.response_metadata.get("finish_reason")
+                if response.additional_kwargs.get("refusal") or finish == "content_filter":
+                    raise ProviderError(self.provider, ErrorCode.REFUSED)
+                if (not isinstance(response, AIMessage) or response.invalid_tool_calls
+                        or finish not in ("stop", "tool_calls")
+                        or (options.get("tool_choice") == "required" and not response.tool_calls)
+                        or (finish == "tool_calls" and not response.tool_calls)
+                        or (not response.tool_calls and not response.content)):
+                    raise ProviderError(self.provider, ErrorCode.INVALID_OUTPUT)
+                usage: dict[str, Any] = cast(dict[str, Any], response.usage_metadata or {})
+                return ModelResult(provider=self.provider,
+                    model=response.response_metadata.get("model_name") or str(self.config.model),
+                    text=response.content if isinstance(response.content, str) else "",
+                    input_tokens=usage.get("input_tokens"),
+                    output_tokens=usage.get("output_tokens"),
+                    total_tokens=usage.get("total_tokens"),
+                    native_message=response, elapsed_seconds=perf_counter() - started_at)
         except _RESPONSE_ERRORS as error:
             raise _error(self.provider, error) from None
 
@@ -198,33 +211,35 @@ class ProviderAdapter:
         text, finish = "", None
         response_model = None
         usage: dict[str, Any] = {}
-        chunks = self.model.stream(messages, stream_usage=True, **options)
-        try:
-            for chunk in chunks:
-                if (chunk.additional_kwargs.get("refusal")
-                        or chunk.response_metadata.get("finish_reason") == "content_filter"):
-                    raise ProviderError(self.provider, ErrorCode.REFUSED)
-                if not isinstance(chunk.content, str):
-                    raise ProviderError(self.provider, ErrorCode.INVALID_OUTPUT)
-                if chunk.content:
-                    text += chunk.content
-                    sent = True
-                    yield ModelStreamEvent(kind="delta", delta=chunk.content)
-                finish = chunk.response_metadata.get("finish_reason") or finish
-                response_model = chunk.response_metadata.get("model_name") or response_model
-                if chunk.usage_metadata:
-                    for key in ("input_tokens", "output_tokens", "total_tokens"):
-                        usage[key] = usage.get(key, 0) + chunk.usage_metadata[key]
-            result = self._result(request, text, finish, usage, started_at, response_model)
-            yield ModelStreamEvent(kind="completed", result=result)
-        except ProviderError as error:
-            error.started = sent
-            raise
-        except _RESPONSE_ERRORS as error:
-            raise _error(self.provider, error, started=sent) from None
-        finally:
-            if isinstance(chunks, Generator):
-                chunks.close()
+        with usage_call(self.provider, str(self.config.model),
+                        str(self.config.base_url), "text"):
+            chunks = self.model.stream(messages, stream_usage=True, **options)
+            try:
+                for chunk in chunks:
+                    if (chunk.additional_kwargs.get("refusal")
+                            or chunk.response_metadata.get("finish_reason") == "content_filter"):
+                        raise ProviderError(self.provider, ErrorCode.REFUSED)
+                    if not isinstance(chunk.content, str):
+                        raise ProviderError(self.provider, ErrorCode.INVALID_OUTPUT)
+                    if chunk.content:
+                        text += chunk.content
+                        sent = True
+                        yield ModelStreamEvent(kind="delta", delta=chunk.content)
+                    finish = chunk.response_metadata.get("finish_reason") or finish
+                    response_model = chunk.response_metadata.get("model_name") or response_model
+                    if chunk.usage_metadata:
+                        for key in ("input_tokens", "output_tokens", "total_tokens"):
+                            usage[key] = usage.get(key, 0) + chunk.usage_metadata[key]
+                result = self._result(request, text, finish, usage, started_at, response_model)
+                yield ModelStreamEvent(kind="completed", result=result)
+            except ProviderError as error:
+                error.started = sent
+                raise
+            except _RESPONSE_ERRORS as error:
+                raise _error(self.provider, error, started=sent) from None
+            finally:
+                if isinstance(chunks, Generator):
+                    chunks.close()
 
 
 """文本配置读取函数：集中展开旧DeepSeek变量与新增提供方设置，不创建连接。"""

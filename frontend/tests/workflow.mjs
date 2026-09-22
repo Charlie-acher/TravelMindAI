@@ -7,7 +7,7 @@ const server = await createServer({ root: fileURLToPath(new URL('..', import.met
 const storage = new Map()
 globalThis.sessionStorage = { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value), removeItem: key => storage.delete(key) }
 globalThis.window = Object.assign(new EventTarget(), { setTimeout, clearTimeout })
-const waiting = { message_id: 'first', revision: 1, response: { result: { original_message: '杭州两天' }, status: 'needs_clarification', reply: '是否采用？', workflow: { run_id: 'run-one', status: 'waiting', attempts: 1, can_accept: true } } }
+const waiting = { message_id: 'first', revision: 1, response: { result: { original_message: '杭州两天' }, status: 'needs_clarification', reply: '是否采用？\n你可以补充条件继续，或选择保留现状。', workflow: { run_id: 'run-one', status: 'waiting', attempts: 1, can_accept: true } } }
 const requests = []
 let offline = true
 let conflict = false
@@ -29,8 +29,10 @@ try {
   await first.initialize('user', false)
   await first.selectConversation('session')
   assert.equal(first.workflowTarget.value, 'first')
-  await first.chooseWorkflow('accept')
-  assert.deepEqual(requests[0].workflow_resume, { run_id: 'run-one', action: 'accept' })
+  assert.equal(first.messages.value.at(-1).text, '是否采用？', '旧历史也不显示废弃的按钮引导')
+  first.input.value = '先出一版方案'
+  await first.send()
+  assert.deepEqual(requests[0].workflow_resume, { run_id: 'run-one', action: 'continue' })
   const reloaded = useRequirementConversation()
   await reloaded.initialize('user')
   offline = false
@@ -45,7 +47,8 @@ try {
   await reloaded.retryWorkflow()
   assert.deepEqual(requests[2], requests[0])
   assert.equal(reloaded.workflowTarget.value, null)
-  await reloaded.chooseWorkflow('cancel')
-  assert.equal(requests.length, 3, '旧卡片不能再次恢复')
+  reloaded.input.value = '好吧'
+  await reloaded.send()
+  assert.equal(requests[3].workflow_resume, undefined, '完成后不再接续旧规划')
   console.log('workflow state checks passed')
 } finally { await server.close() }

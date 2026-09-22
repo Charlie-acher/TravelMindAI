@@ -7,6 +7,7 @@ import { modelNames, type ModelOption, getModelStatus, listSessions, renameSessi
 import { advanceAuthGeneration, ApiError } from './api/http'
 import { useRequirementConversation } from './useRequirementConversation'
 import DocumentPanel from './components/DocumentPanel.vue'
+import UsagePanel from './components/UsagePanel.vue'
 import AttractionCards from './components/AttractionCards.vue'
 import RestaurantCards from './components/RestaurantCards.vue'
 import ItineraryCard from './components/ItineraryCard.vue'
@@ -30,7 +31,7 @@ const confirmPassword = ref('')
 const registering = ref(false)
 const authDialog = ref<HTMLDialogElement | null>(null)
 const pendingQuestion = ref<string | null>(null)
-const activePage = ref<'chat' | 'documents'>('chat')
+const activePage = ref<'chat' | 'documents' | 'usage'>('chat')
 const documentsOpened = ref(false)
 const sessions = ref<SessionSummary[]>([])
 const nextCursor = ref<string | null>(null)
@@ -43,7 +44,7 @@ let listGeneration = 0
 const { messages, input, selectedProvider, sessionId, busy, stopping, canStop, stop, restoring, restoreFailed, error, storageWarning, progress,
   chatArea, initialize, reloadConversation, send: sendConversation,
   selectConversation, clearConversation, deleteConversation, undoDraft, undoTarget, pendingUndo,
-  selectedAttachments, uploading, addAttachments, removeAttachment, workflowTarget, chooseWorkflow, pendingResume, retryWorkflow } = useRequirementConversation()
+  selectedAttachments, uploading, addAttachments, removeAttachment, pendingResume, retryWorkflow } = useRequirementConversation()
 const attachmentInput = ref<HTMLInputElement | null>(null)
 const uploadMenu = ref<HTMLElement | null>(null)
 const fileDragDepth = ref(0)
@@ -401,6 +402,7 @@ onBeforeUnmount(() => { window.removeEventListener('travelmind:unauthorized', un
       </nav>
       <div class="sidebar-bottom">
         <button v-if="account.role === 'admin'" class="knowledge-entry" :class="{ selected: activePage === 'documents' }" @click="documentsOpened = true; activePage = 'documents'; mobileOpen = false"><ChatIcon name="books" /><span>知识库管理</span><span class="admin-tag">管理</span></button>
+        <button v-if="account.role === 'admin'" class="knowledge-entry" :class="{ selected: activePage === 'usage' }" @click="activePage = 'usage'; mobileOpen = false"><ChatIcon name="books" /><span>调用费用</span><span class="admin-tag">管理</span></button>
         <details class="profile">
           <summary class="account" :aria-label="`${account.username}的账号菜单`"><span class="avatar">{{ account.username.slice(0, 1).toUpperCase() }}</span><span class="account-label"><strong>{{ account.username }}</strong><small>{{ account.role === 'admin' ? '管理员账号' : '个人账号' }}</small></span><ChatIcon name="chevron" /></summary>
           <div class="profile-menu"><strong>{{ account.username }}</strong><small>{{ account.role === 'admin' ? '管理员 · 共享知识库管理' : '个人账号 · 私人旅行对话' }}</small><button :disabled="busy || authBusy || !!deletingId || !!renamingId" @click="signOut"><ChatIcon name="logout" />退出登录</button></div>
@@ -408,32 +410,27 @@ onBeforeUnmount(() => { window.removeEventListener('travelmind:unauthorized', un
       </div>
     </aside>
     <main class="workspace">
-      <header class="topbar"><div class="topbar-left"><button class="icon-button expand" aria-label="展开侧栏" @click="collapsed = false; mobileOpen = true"><ChatIcon name="panel" /></button><span class="conversation-title">{{ activePage === 'documents' ? '知识库管理' : currentTitle }}</span></div>
+      <header class="topbar"><div class="topbar-left"><button class="icon-button expand" aria-label="展开侧栏" @click="collapsed = false; mobileOpen = true"><ChatIcon name="panel" /></button><span class="conversation-title">{{ activePage === 'documents' ? '知识库管理' : activePage === 'usage' ? '调用费用' : currentTitle }}</span></div>
         <div v-if="activePage === 'chat' && modelState !== 'configured'" class="service-state" role="status"><span>{{ modelState === 'checking' ? '正在连接…' : '服务暂不可用' }}</span><button v-if="modelState !== 'checking'" @click="checkModel">重新检查</button></div>
-        <button v-if="activePage === 'documents'" class="back-chat" @click="activePage = 'chat'">返回对话 ↗</button>
+        <button v-if="activePage !== 'chat'" class="back-chat" @click="activePage = 'chat'">返回对话 ↗</button>
       </header>
       <a-alert v-if="authError" type="error">{{ authError }}</a-alert>
       <section v-show="activePage === 'chat'" class="chat-area" :class="{ 'is-empty': emptyChat }" aria-label="旅行对话">
         <div v-if="emptyChat" class="welcome"><div class="welcome-brand"><img src="/brand/logo-mark.svg" alt="" /><span>TravelMind<em>AI</em></span></div><h1>这次，想去哪里？</h1></div>
         <div v-show="!emptyChat" ref="chatArea" class="messages chat-messages" role="log" aria-label="旅行对话" aria-live="polite"><div v-for="message in visibleMessages" :key="message.id" class="message-row" :class="message.role">
           <img v-if="message.role === 'assistant'" class="message-avatar" src="/brand/logo-mark.svg" alt="" /><div class="message-content"><span class="message-name">{{ message.role === 'assistant' ? 'TravelMind AI' : '你' }}</span>
-            <ThinkingProcess v-if="message.process" :steps="message.process.steps" :seconds="message.process.seconds" />
+            <ThinkingProcess v-if="message.process" :steps="message.process.steps" :seconds="message.process.seconds" :timings="message.process.timings" />
             <AttachmentCards v-if="message.role === 'user' && sessionId && message.attachments?.length" class="user-attachments" :session-id="sessionId" :items="message.attachments" originals-only />
             <div v-if="message.role === 'assistant'" class="message-bubble markdown-answer" v-html="renderMarkdown(message.text)" /><div v-else-if="message.text" class="message-bubble">{{ message.text }}</div><AttractionCards v-if="message.role === 'assistant' && message.attractions?.length" :items="message.attractions" />
             <p v-if="message.attractions?.length && message.knowledge?.clarification && !message.text.includes(message.knowledge.clarification)" class="answer-followup">{{ message.knowledge.clarification }}</p>
             <RestaurantCards v-if="message.role === 'assistant' && message.restaurants?.length" :items="message.restaurants" :category="message.nearby?.category" :provider="message.nearby?.provider" />
             <ItineraryCard v-if="message.role === 'assistant' && message.itinerary" :snapshot="message.itinerary" :origin="message.origin" :undo-available="message.messageId === undoTarget && !pendingUndo" :busy="busy || restoreFailed || checkingAuth || !!deletingId || !!renamingId" @undo="undo(message.messageId!)" @query="input = $event" />
-            <section v-if="message.role === 'assistant' && message.workflow?.status === 'waiting'" class="workflow-choice" aria-label="待补充或选择">
-              <details v-if="message.workflow.preview" open><summary>待采用的候选行程</summary>
+            <section v-if="message.role === 'assistant' && message.workflow?.preview" class="workflow-preview" aria-label="候选行程">
+              <details><summary>待采用的候选行程</summary>
                 <div v-for="day in message.workflow.preview.days" :key="day.day"><strong>第{{ day.day }}天</strong><ul><li v-for="activity in day.activities" :key="activity.place.id">{{ activity.start_time }} · {{ activity.place.map.name }} · {{ activity.duration_minutes }}分钟</li></ul></div>
                 <p>演示预算估算：{{ message.workflow.preview.budget.total }}元</p>
                 <p v-for="warning in message.workflow.preview.warnings" :key="warning">{{ warning }}</p>
               </details>
-              <template v-if="message.messageId === workflowTarget">
-                <p>在下方补充条件并发送，即可继续这次规划。</p>
-                <a-button v-if="message.workflow.can_accept" :disabled="busy || restoreFailed || uploading || !!deletingId || !!renamingId" @click="chooseWorkflow('accept')">采用当前候选行程</a-button>
-                <a-button :disabled="busy || restoreFailed || uploading || !!deletingId || !!renamingId" @click="chooseWorkflow('cancel')">保留现状</a-button>
-              </template><p v-else>此条等待已结束，请以最新对话为准。</p>
             </section>
             <AnswerSources v-if="message.role === 'assistant' && message.knowledge" :knowledge="message.knowledge" />
             <AttachmentCards v-if="message.role === 'assistant' && sessionId && message.attachments?.length" :session-id="sessionId" :items="message.attachments" :use="message.attachmentUse" :planned="!!message.itinerary" />
@@ -470,6 +467,7 @@ onBeforeUnmount(() => { window.removeEventListener('travelmind:unauthorized', un
           <p v-if="!emptyChat" class="composer-note">AI 生成内容仅供参考，请核实出行信息。</p>
         </div>
       </section>
+      <section v-if="account.role === 'admin' && activePage === 'usage'" class="documents-workspace"><UsagePanel /></section>
       <section v-if="account.role === 'admin' && documentsOpened" v-show="activePage === 'documents'" class="documents-workspace"><DocumentPanel :active="activePage === 'documents'" /></section>
     </main>
     <div ref="sessionMenu" popover class="floating-menu" aria-label="对话操作"><button @click="menuItem && openRename(menuItem)"><ChatIcon name="edit" />重命名</button><div class="menu-divider" /><button class="danger" @click="menuItem && confirmDelete(menuItem)"><ChatIcon name="trash" />删除对话</button></div>

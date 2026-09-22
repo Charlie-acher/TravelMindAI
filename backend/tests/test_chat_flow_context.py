@@ -150,7 +150,7 @@ def test_invalid_map_choice_continues_retrieval(monkeypatch, invalid_arguments):
 
 
 @pytest.mark.parametrize("invalid_arguments", [False, True])
-def test_invalid_plan_choice_requests_retry(monkeypatch, invalid_arguments):
+def test_invalid_plan_choice_gives_reference_reply(monkeypatch, invalid_arguments):
     from app.llm.client import ModelOutputError
     from tests.helpers import evidence
 
@@ -173,9 +173,9 @@ def test_invalid_plan_choice_requests_retry(monkeypatch, invalid_arguments):
                                       expected_revision=0)
     result = process_saved_message(history.session_id, payload, model, service, "plan-fallback",
                                   nullcontext(search), Mock())
-    assert "重试" in result.response.reply
+    assert result.response.reply == model.generate_text.return_value
     assert result.response.status == "needs_clarification"
     assert result.response.result.extraction.destination == "杭州"
     assert result.response.itinerary is None
     search.search.assert_not_called()
-    model.generate_text.assert_not_called()
+    model.generate_text.assert_called_once()

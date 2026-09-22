@@ -225,6 +225,7 @@ class ModelGateway:
                 current = request
                 for attempt in range(2):
                     outcome, code = None, None
+                    result = None
                     try:
                         if streaming:
                             events = self.adapters[name].stream(current)

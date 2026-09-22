@@ -15,6 +15,19 @@ PROVIDERS = ("deepseek", "qwen", "kimi")
 REQUEST = ModelRequest(messages=[{"role": "user", "content": "返回城市杭州"}])
 
 
+"""工具契约测试函数：要求工具调用却只返回正文，应进入网关已有的恢复路径。"""
+
+def test_required_tool_plain_text_is_invalid_output():
+    from langchain_core.messages import HumanMessage
+    with httpx.Client(transport=httpx.MockTransport(
+        lambda request: httpx.Response(200, json=envelope()),
+    )) as http:
+        with pytest.raises(ProviderError) as caught:
+            adapter("kimi", http).native([HumanMessage(content="查询")],
+                                        {"tool_choice": "required"})
+    assert caught.value.code == "invalid_output"
+
+
 """模拟响应函数：使用兼容接口完整外层结构，包含标准token统计。"""
 
 def envelope(content: str = "杭州", finish: str = "stop") -> dict:

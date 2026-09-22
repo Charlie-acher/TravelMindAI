@@ -9,6 +9,7 @@ from typing import Any
 from pydantic_core import from_json
 
 from app.schemas.document.answer import AnswerPoint
+from app.services.chat.metrics import active_metrics
 
 EventSink = Callable[[str, dict[str, object]], None]
 event_sink: ContextVar[EventSink | None] = ContextVar("chat_event_sink", default=None)
@@ -33,6 +34,8 @@ def check_cancelled() -> None:
 
 def emit(event: str, **data: object) -> None:
     check_cancelled()
+    if (metrics := active_metrics.get()) is not None:
+        metrics.observe(event, data)
     sink = event_sink.get()
     if sink is not None:
         sink(event, data)

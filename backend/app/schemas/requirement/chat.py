@@ -16,6 +16,7 @@ from app.schemas.itinerary import PlanSnapshot
 from app.schemas.map_tools import MapToolAnswer
 from app.schemas.requirement.base import RequirementResult, TravelRequestExtraction
 from app.schemas.requirement.conversation import ConversationState, HistorySummary
+from app.schemas.transport import TransportResult
 from app.schemas.workflow import WorkflowResume, WorkflowSnapshot
 
 
@@ -53,3 +54,4 @@ class RequirementChatResponse(BaseModel):
     selected_provider: SelectableProvider = "deepseek"  # 老历史按原固定模型兼容读取。
     used_providers: list[SelectableProvider] = Field(default_factory=list)
     agent_tasks: list[dict[str, Any]] = Field(default_factory=list)  # 程序生成的研究委派摘要。
+    transport: TransportResult | None = None  # 官方交通查询快照，旧记录没有时为None。

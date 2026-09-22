@@ -13,6 +13,7 @@ from app.models.document import DocumentChunkRecord, DocumentRecord
 from app.models.document_job import DocumentJobRecord
 from app.models.requirement_turn import RequirementTurn
 from app.models.trip import Itinerary, TravelRequest, TravelSession
+from app.models.usage import UsageEvent
 from app.schemas.common import ErrorResponse
 from app.services.document.vector_store import MilvusError, MilvusStore
 
@@ -43,7 +44,7 @@ def ready(request: Request) -> dict[str, object] | JSONResponse:
                 for model in [
                     TravelSession, TravelRequest, Itinerary, RequirementTurn, DocumentRecord,
                     DocumentChunkRecord, DocumentJobRecord, User, AuthSession,
-                    ConversationAttachment,
+                    ConversationAttachment, UsageEvent,
                 ]:
                     # LIMIT 0 校验表与映射字段存在，但不返回任何会话或草稿记录。
                     connection.execute(select(model).limit(0))

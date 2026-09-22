@@ -331,6 +331,8 @@ def test_stop_waits_for_worker_and_never_sends_done(monkeypatch) -> None:
         assert await routes.message_execution(session_id, message_id, request) == {"running": True}
         release.set()
         frame = await anext(iterator)
+        assert "event: metrics" in frame and '"outcome": "failed"' in frame
+        frame = await anext(iterator)
         assert '"status": 499' in frame and "event: done" not in frame
         await asyncio.gather(*list(request.app.state.chat_workers))
         await asyncio.sleep(0)

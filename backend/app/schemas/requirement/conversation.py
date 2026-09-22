@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 from app.schemas.attachment import AttachmentUse
 from app.schemas.requirement.update import RequirementUpdate
+from app.schemas.transport import TransportQuery
 
 TopicCity = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=80)]
 TopicPlace = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
@@ -41,3 +42,10 @@ class TurnUnderstanding(BaseModel):
     retrieval_category: Literal["景点", "餐馆", "住宿"] | None = None
     conversation: ConversationState
     attachment_use: AttachmentUse | None = None
+    transport_query: TransportQuery | None = None  # 独立交通查询，不因缺预算而阻断。
+    transport_continue: bool = False  # 接续上一轮交通条件，未提及项由程序保留。
+    transport_clear_fields: list[Literal[
+        "origin", "destination", "departure_date", "return_date", "travelers",
+        "earliest_departure", "latest_arrival", "return_earliest_departure",
+        "return_latest_arrival", "preferences",
+    ]] = Field(default_factory=list)

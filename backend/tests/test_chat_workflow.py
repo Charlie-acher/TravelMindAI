@@ -19,6 +19,9 @@ from tests.test_workflow_review import candidate
 def setup_run(engine, monkeypatch, reviews):
     from app.services.chat import workflow
 
+    monkeypatch.setattr(workflow, "planning_reply_action", lambda *args, **kwargs: "continue",
+                        raising=False)
+
     trip = TripService(engine).create_session("编排测试", user_id=TEST_USER_ID)
     history = RequirementHistoryService(engine)
     model = Mock()
@@ -242,3 +245,49 @@ def test_attachment_clarification_without_message_intent_still_interrupts(
     monkeypatch.setattr(workflow, "process_saved_message", attachment_reply)
     result = call()
     assert result.response.workflow.status == "waiting"
+
+
+"""自然结束回归：不再生成候选，不创建行程，也不重复索要条件。"""
+
+def test_natural_ending_cancels_waiting_without_generating(store_engine, monkeypatch):
+    from app.schemas.workflow import WorkflowResume
+    from app.services.chat import workflow
+
+    trip, history, payload, call, generated = setup_run(store_engine, monkeypatch,
+        ['{"decision":"choice","issues":[],"question":"是否采用？"}'])
+    waiting = call()
+    assert "保留现状" not in waiting.response.reply
+    monkeypatch.setattr(workflow, "planning_reply_action", lambda *a, **k: "cancel", raising=False)
+    message = SavedRequirementMessage(message="好吧", message_id=uuid4(), expected_revision=1,
+        workflow_resume=WorkflowResume(run_id=waiting.response.workflow.run_id, action="continue"))
+    result = call(message)
+    assert result.response.workflow.status == "cancelled"
+    assert len(generated) == 1 and history.read_plan(trip.id) == (0, None)
+    assert "已有行程" not in result.response.reply
+    assert call(message) == result
+
+
+"""暂缓后仍可用自然语言采用已审查候选，重建图和重试不会增加版本。"""
+
+def test_defer_keeps_candidate_then_natural_accept(store_engine, monkeypatch):
+    from app.schemas.workflow import WorkflowResume
+    from app.services.chat import workflow
+
+    trip, history, payload, call, generated = setup_run(store_engine, monkeypatch,
+        ['{"decision":"choice","issues":[],"question":"是否采用？"}'])
+    waiting = call()
+    monkeypatch.setattr(workflow, "planning_reply_action", lambda *a, **k: "defer", raising=False)
+    deferred = SavedRequirementMessage(message="我再想想", message_id=uuid4(), expected_revision=1,
+        workflow_resume=WorkflowResume(run_id=waiting.response.workflow.run_id, action="continue"))
+    result = call(deferred)
+    assert result.response.workflow.status == "waiting"
+    assert result.response.workflow.preview == waiting.response.workflow.preview
+    assert "再问" in result.response.reply or "再安排" in result.response.reply
+    assert call(deferred) == result
+    monkeypatch.setattr(workflow, "planning_reply_action", lambda *a, **k: "accept", raising=False)
+    accepted = SavedRequirementMessage(message="先出一版方案", message_id=uuid4(),
+        expected_revision=2,
+        workflow_resume=WorkflowResume(run_id=waiting.response.workflow.run_id, action="continue"))
+    saved = call(accepted)
+    assert saved.response.itinerary.version == 1
+    assert len(generated) == 1 and call(accepted) == saved

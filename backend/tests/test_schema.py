@@ -74,7 +74,7 @@ def test_migration_round_trip_matches_models(migrated_database: tuple[Connection
         "document_chunks", "document_jobs",
         "alembic_version", "users", "auth_sessions", "conversation_attachments",
         "chat_workflows", "checkpoints", "checkpoint_blobs", "checkpoint_writes",
-        "checkpoint_migrations",
+        "checkpoint_migrations", "usage_events",
     }
     assert set(inspect(connection).get_table_names()) == expected
     differences = compare_metadata(MigrationContext.configure(connection), Base.metadata)

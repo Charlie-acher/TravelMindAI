@@ -70,6 +70,7 @@ export interface TravelPlan {
   format: 'daily-plan-v1'; title: string; destination: string
   days: { day: number; date: string | null; activities: PlannedActivity[] }[]
   budget: BudgetSummary; warnings: string[]
+  ticket_prices?: { place: string; travel_date: string | null; status: 'published' | 'unavailable' | 'unconfigured' | 'error' | 'expired' | 'not_applicable'; amount: string | null; currency: string; unit: string; conditions: string; evidence: string; source_url: string | null; source_title: string | null; published_date: string | null; checked_at: string; valid_from: string | null; valid_until: string | null; date_confirmed: false }[]
 }
 export interface PlanSnapshot {
   itinerary_id: string; version: number; previous_version: number | null
@@ -95,6 +96,7 @@ export interface DiningResult {
 
 /** 过程事件类型：只展示后端实际阶段和公开回答草稿，不接收推理或原始模型JSON。 */
 export type RequirementUpdate =
+  | { event: 'metrics'; data: { stages_seconds: Record<string, number>; first_draft_seconds: number | null; total_seconds: number } }
   | { event: 'fallback'; data: { from_alias: ModelProvider; to_alias: ModelProvider; reason_category: string } }
   | { event: 'progress'; data: { stage: string; message: string } }
   | { event: 'draft'; data: { text: string } }
@@ -115,7 +117,7 @@ export async function readRequirementStream(
   /** 事件分发函数：多行data以换行连接，心跳注释不产生界面进度。 */
   function dispatch(): void {
     if (!data.length || saved) { event = ''; data = []; return }
-    if (!['progress', 'draft', 'reset', 'fallback', 'done', 'error'].includes(event)) { event = ''; data = []; return }
+    if (!['progress', 'draft', 'reset', 'fallback', 'metrics', 'done', 'error'].includes(event)) { event = ''; data = []; return }
     let payload
     try { payload = JSON.parse(data.join('\n')) }
     catch { throw new Error('服务返回了无法读取的回复，请重新读取对话后重试。') }
@@ -125,7 +127,7 @@ export async function readRequirementStream(
       saved = payload as SavedTurn
     }
     else if (event === 'error') throw new ApiError(payload.message, payload.status)
-    else if (event === 'progress' || event === 'draft' || event === 'reset' || event === 'fallback') onUpdate({ event, data: payload } as RequirementUpdate)
+    else if (event === 'progress' || event === 'draft' || event === 'reset' || event === 'fallback' || event === 'metrics') onUpdate({ event, data: payload } as RequirementUpdate)
     event = ''; data = []
   }
 

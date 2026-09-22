@@ -19,7 +19,7 @@ globalThis.fetch = async (url, init) => {
       selected_provider: request.selected_provider, used_providers: ['kimi'],
     } }
     turns = [turn]
-    return new Response(`event: fallback\ndata: {"from_alias":"qwen","to_alias":"kimi","reason_category":"unavailable"}\n\nevent: done\ndata: ${JSON.stringify(turn)}\n\n`, { headers: { 'Content-Type': 'text/event-stream' } })
+    return new Response(`event: fallback\ndata: {"from_alias":"qwen","to_alias":"kimi","reason_category":"rate_limit"}\n\nevent: done\ndata: ${JSON.stringify(turn)}\n\n`, { headers: { 'Content-Type': 'text/event-stream' } })
   }
   throw new Error(url)
 }
@@ -34,6 +34,7 @@ try {
   assert.equal(requests[0].selected_provider, 'qwen')
   assert.deepEqual(first.messages.value.at(-1).usedProviders, ['kimi'])
   assert.ok(first.messages.value.at(-1).process.steps.some(step => step.message.includes('Kimi')))
+  assert.ok(first.messages.value.at(-1).process.steps.some(step => step.message.includes('请求频率受限')))
   const restored = useRequirementConversation()
   await restored.initialize('user')
   assert.equal(restored.selectedProvider.value, 'qwen', '备用不能覆盖会话首选')

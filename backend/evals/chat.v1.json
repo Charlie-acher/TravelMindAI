@@ -1,0 +1,25 @@
+{
+  "version": "chat-v1",
+  "cases": [
+    {"id": "vague", "category": "模糊需求", "turns": [
+      {"message": "想带爸妈出去走走，少走路、节奏舒服，先聊聊去哪里。", "expected": {"fields": {"pace": "relaxed"}, "plan": false}}
+    ]},
+    {"id": "missing-city-data", "category": "资料不足仍给建议", "turns": [
+      {"message": "带爸妈去郑州三天，三个人，总预算5000元，少走路节奏舒适，给我一版方案。", "expected": {"fields": {"destination": "郑州", "days": 3, "travelers": 3, "total_budget": "5000", "pace": "relaxed"}, "reply_has_any": ["第1天", "第一天", "Day 1", "第 1 天"]}}
+    ]},
+    {"id": "family-and-edit", "category": "亲子节奏与指定日修改", "turns": [
+      {"message": "杭州两天，两个大人带一个孩子，共三人，总预算6000元，节奏轻松，每天最多两个景点，不去灵隐寺，请安排行程。", "expected": {"fields": {"destination": "杭州", "travelers": 3, "total_budget": "6000", "pace": "relaxed"}, "plan": true, "max_activities": 2, "exclude_place": "灵隐寺"}},
+      {"message": "第二天11点开始，轻松一点，其他安排不变。", "expected": {"fields": {"destination": "杭州", "travelers": 3, "total_budget": "6000"}, "plan": true, "unchanged_days": [1], "day_starts": {"2": "11:00"}, "max_activities": 2}},
+      {"message": "顺便问问苏州有哪些值得了解的园林？不改杭州的行程。", "expected": {"fields": {"destination": "杭州", "travelers": 3, "total_budget": "6000"}, "plan": false}}
+    ]},
+    {"id": "low-budget", "category": "预算不足", "turns": [
+      {"message": "三个人去杭州玩两天，全团总预算只有100元，请给出建议，不要自行提高预算。", "expected": {"fields": {"total_budget": "100", "travelers": 3}, "plan": false, "reply_has_any": ["预算", "100"]}}
+    ]},
+    {"id": "attachment-conflict", "category": "附件目的地冲突", "attachment": {"name": "hangzhou-eval.md", "text": "# 杭州两日路线\n第一天：杭州西湖断桥残雪。\n第二天：杭州雷峰塔。\n本文件只介绍杭州，不含郑州地点。"}, "turns": [
+      {"message": "去郑州两天，两个人，总预算5000元，附件里的地点必须全部安排进去，不要换城市。", "expected": {"fields": {"destination": "郑州"}, "plan": false}}
+    ]},
+    {"id": "tool-model-failure", "category": "工具模型故障", "provider": "kimi", "fault_provider": "kimi", "turns": [
+      {"message": "杭州两天两个人，预算5000元，节奏轻松，安排一份行程。", "expected": {"fields": {"destination": "杭州", "days": 2, "travelers": 2}, "fallback": true, "plan": true}}
+    ]}
+  ]
+}

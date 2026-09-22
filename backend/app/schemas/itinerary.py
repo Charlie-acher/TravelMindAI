@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, HttpUrl
 
 from app.schemas.budget import BudgetSummary
 from app.schemas.document.answer import MapLookup
+from app.schemas.travel_price import PublishedPrice
 
 
 class PlanSource(BaseModel):
@@ -77,6 +78,7 @@ class TravelPlan(BaseModel):
     days: list[PlanDay] = Field(min_length=2, max_length=5)
     budget: BudgetSummary
     warnings: list[str]
+    ticket_prices: list[PublishedPrice] = Field(default_factory=list)
 
 
 class PlanSnapshot(BaseModel):

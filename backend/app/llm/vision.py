@@ -10,6 +10,7 @@ from openai import OpenAIError
 
 from app.config import Settings
 from app.llm.client import ModelClientError, ModelOutputError
+from app.services.usage import observe_model, usage_call
 
 
 class QwenVisionClient:
@@ -20,6 +21,7 @@ class QwenVisionClient:
     def __init__(self, settings: Settings, http: httpx.Client) -> None:
         if not settings.vision_api_key or not settings.vision_base_url:
             raise ModelClientError("尚未配置百炼视觉模型，请配置后重试图片识别")
+        self.endpoint = str(settings.vision_base_url)
         self.timeout = settings.vision_timeout_seconds
         self.model = ChatOpenAI(
             model=settings.vision_model, api_key=settings.vision_api_key,
@@ -57,16 +59,19 @@ class QwenVisionClient:
                 "url": f"data:{mime_type};base64,{encoded}",
             }})
         try:
-            response = self.model.invoke([
-                SystemMessage(content=prompt),
-                HumanMessage(content=parts),
-            ],
-                response_format={"type": "json_object"},
-                extra_body={"enable_thinking": False,
-                            "max_tokens": 8192 if len(images) > 1 else 4096},
-                # 多页同读最多等待120秒；总页数上限由PDF读取层控制。
-                timeout=self.timeout if len(images) == 1 else min(120, self.timeout * len(images)),
-            )
+            with usage_call("qwen", self.model.model_name, self.endpoint, "vision"):
+                response = self.model.invoke([
+                    SystemMessage(content=prompt),
+                    HumanMessage(content=parts),
+                ],
+                    response_format={"type": "json_object"},
+                    extra_body={"enable_thinking": False,
+                                "max_tokens": 8192 if len(images) > 1 else 4096},
+                    # 多页同读最多等待120秒；总页数上限由PDF读取层控制。
+                    timeout=self.timeout if len(images) == 1 else min(
+                        120, self.timeout * len(images)),
+                )
+                observe_model(response)
         except (OpenAIError, ValueError, TypeError, KeyError, IndexError) as error:
             raise ModelClientError("百炼图片识别未完成，请稍后重试") from error
         if (response.response_metadata.get("finish_reason") != "stop"

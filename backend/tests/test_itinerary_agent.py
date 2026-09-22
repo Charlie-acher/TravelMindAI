@@ -91,6 +91,30 @@ def test_explicit_start_is_verified_without_external_evidence():
     assert unresolved_constraints(requirements(hard_constraints=["必须全程无障碍"]))
 
 
+"""截图回归：旧记录误存的舒适偏好不能阻止预算补齐后的首次规划。"""
+
+def test_gentle_preferences_in_old_constraints_do_not_block_planning():
+    from app.schemas.requirement.update import RequirementUpdate
+    from app.services.requirement.merge import merge_requirements
+
+    previous = requirements(hard_constraints=["少走路", "节奏舒适"])
+    merged = merge_requirements(previous, RequirementUpdate.model_validate(answer(
+        intent="modify_trip", total_budget="5000")))
+    assert merged.pace == "relaxed"
+    assert merged.hard_constraints == []
+    assert "少走路" in merged.interests
+    assert build_plan(merged, [proposal(1, "p1"), proposal(2, "p2")],
+                      places(), None, None).days
+
+
+"""证据不足不等于条件冲突：先给可讨论草稿，但不能声称未查明要求已满足。"""
+
+def test_unverified_constraint_allows_draft_with_specific_notice():
+    plan = build_plan(requirements(hard_constraints=["必须全程无障碍"]),
+        [proposal(1, "p1"), proposal(2, "p2")], places(), None, None)
+    assert any("必须全程无障碍" in warning and "未确认" in warning for warning in plan.warnings)
+
+
 def test_empty_patch_recalculates_budget_and_preserves_activities():
     old = build_plan(requirements(), [proposal(1, "p1"), proposal(2, "p2")],
                      places(), None, None)

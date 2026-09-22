@@ -11,6 +11,7 @@ import httpx
 from app.schemas.document.base import ParsedDocument, ParsedSection
 from app.services.chat.events import progress
 from app.services.document.parser import MAX_SECTIONS, MAX_TEXT_CHARACTERS
+from app.services.usage import usage_call
 
 PARSER_VERSION = "mineru-4.0.4-ocr-v1"
 MINERU_SUFFIXES = {".pdf", ".docx", ".png", ".jpg", ".jpeg", ".webp"}
@@ -98,44 +99,47 @@ class MinerUClient:
                 raise MinerUError("MinerU返回了无效结果，请检查服务后重试")
             return data
 
-        try:
-            entry: dict[str, Any] = {"source": {"type": "inline",
-                "name": "attachment" + Path(name).suffix.lower(),
-                "data": base64.b64encode(content).decode("ascii")}}
-            if expected_pages is not None:
-                entry["page_range"] = "all"
-            job = request("POST", "/v1/parse/jobs", json={"files": [entry],
-                "tier": "flash" if Path(name).suffix.lower() == ".docx" else "standard",
-                # 旧攻略PDF可能有错码文字层；按实际页面OCR，避免再次信任损坏文字。
-                "ocr_mode": "auto" if Path(name).suffix.lower() == ".docx" else "ocr",
-                "output_formats": ["structured_content"]})
-            job_id = str(job["job_id"])
-            while job["status"] in {"queued", "running"}:
-                progress("attachment", "MinerU正在识别附件正文与表格，请稍候")
-                time.sleep(min(2, max(0, deadline - time.monotonic())))
-                job = request("GET", "/v1/parse/jobs/" + quote(job_id, safe=""))
-            if job["status"] != "completed" or len(job["files"]) != 1:
-                raise MinerUError("MinerU未完成整份附件的识别，请检查服务后重试")
-            result = job["files"][0]
-            if result["status"] != "completed":
-                raise MinerUError("MinerU附件解析失败，原件已保留，请重试")
-            identifier = result["output_files"]["structured_content"]["file_id"]
-            parsed = parse_result(request("GET", "/v1/files/" + quote(identifier, safe="")
-                + "/content"), expected_pages)
-            if Path(name).suffix.lower() == ".docx" and any(
-                section.section_path == ["图片"] for section in parsed.sections
-            ):
-                parsed.warnings.append("DOCX含嵌入图片，当前保留图片位置，尚未执行图片视觉补读。")
-            return parsed
-        except (httpx.HTTPError, KeyError, TypeError, ValueError) as error:
-            if isinstance(error, MinerUError):
-                raise
-            raise MinerUError("MinerU服务不可用或结果不完整，请检查本机解析服务后重试") from error
-        finally:
-            # 取消仍在运行的超时任务；完成任务无需取消。外部错误不覆盖原识别错误。
-            if job_id is not None and time.monotonic() >= deadline:
-                try:
-                    self.http.post(self.base_url + "/v1/parse/jobs/" + quote(job_id, safe="")
-                        + "/cancel", timeout=5)
-                except httpx.HTTPError:
-                    pass
+        with usage_call("mineru", "local-parse", self.base_url, "ocr") as call:
+            call["units"] = expected_pages
+            try:
+                entry: dict[str, Any] = {"source": {"type": "inline",
+                    "name": "attachment" + Path(name).suffix.lower(),
+                    "data": base64.b64encode(content).decode("ascii")}}
+                if expected_pages is not None:
+                    entry["page_range"] = "all"
+                job = request("POST", "/v1/parse/jobs", json={"files": [entry],
+                    "tier": "flash" if Path(name).suffix.lower() == ".docx" else "standard",
+                    # 旧攻略PDF可能有错码文字层；按实际页面OCR，避免再次信任损坏文字。
+                    "ocr_mode": "auto" if Path(name).suffix.lower() == ".docx" else "ocr",
+                    "output_formats": ["structured_content"]})
+                job_id = str(job["job_id"])
+                while job["status"] in {"queued", "running"}:
+                    progress("attachment", "MinerU正在识别附件正文与表格，请稍候")
+                    time.sleep(min(2, max(0, deadline - time.monotonic())))
+                    job = request("GET", "/v1/parse/jobs/" + quote(job_id, safe=""))
+                if job["status"] != "completed" or len(job["files"]) != 1:
+                    raise MinerUError("MinerU未完成整份附件的识别，请检查服务后重试")
+                result = job["files"][0]
+                if result["status"] != "completed":
+                    raise MinerUError("MinerU附件解析失败，原件已保留，请重试")
+                identifier = result["output_files"]["structured_content"]["file_id"]
+                parsed = parse_result(request("GET", "/v1/files/" + quote(identifier, safe="")
+                    + "/content"), expected_pages)
+                if Path(name).suffix.lower() == ".docx" and any(
+                    section.section_path == ["图片"] for section in parsed.sections
+                ):
+                    parsed.warnings.append("DOCX含嵌入图片，当前保留图片位置，尚未执行图片视觉补读。")
+                return parsed
+            except (httpx.HTTPError, KeyError, TypeError, ValueError) as error:
+                if isinstance(error, MinerUError):
+                    raise
+                raise MinerUError(
+                    "MinerU服务不可用或结果不完整，请检查本机解析服务后重试") from error
+            finally:
+                # 取消仍在运行的超时任务；完成任务无需取消。外部错误不覆盖原识别错误。
+                if job_id is not None and time.monotonic() >= deadline:
+                    try:
+                        self.http.post(self.base_url + "/v1/parse/jobs/" + quote(job_id, safe="")
+                            + "/cancel", timeout=5)
+                    except httpx.HTTPError:
+                        pass

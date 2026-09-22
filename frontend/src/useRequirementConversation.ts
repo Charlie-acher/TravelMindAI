@@ -11,9 +11,16 @@ import type { AnswerResult, AttractionCard } from './api/documents'
 import { listAttachments, uploadAttachment, type AttachmentSnapshot, type AttachmentUse } from './api/attachments'
 
 /** 消息类型：气泡只展示自然语言，知识依据由后端保存和校验。 */
-interface ChatMessage { usedProviders?: ModelProvider[]; workflow?: WorkflowSnapshot | null; origin?: string | null; id: string; role: 'user' | 'assistant'; text: string; failed?: boolean; attachments?: AttachmentSnapshot[]; attachmentUse?: AttachmentUse | null; knowledge?: AnswerResult | null; attractions?: AttractionCard[]; restaurants?: DiningItem[]; nearby?: DiningResult | null; clarification?: string | null; itinerary?: PlanSnapshot | null; messageId?: string; process?: { steps: { stage: string; message: string }[]; draft: string; seconds: number } }
+interface ChatMessage { usedProviders?: ModelProvider[]; workflow?: WorkflowSnapshot | null; origin?: string | null; id: string; role: 'user' | 'assistant'; text: string; failed?: boolean; attachments?: AttachmentSnapshot[]; attachmentUse?: AttachmentUse | null; knowledge?: AnswerResult | null; attractions?: AttractionCard[]; restaurants?: DiningItem[]; nearby?: DiningResult | null; clarification?: string | null; itinerary?: PlanSnapshot | null; messageId?: string; process?: { steps: { stage: string; message: string }[]; draft: string; seconds: number; timings?: Record<string, number> } }
 const legacyStorageKey = 'travelmind.requirement-conversation.v1'
 const welcome = '你好，想去哪里旅行？\n你可以告诉我时间、人数和预算，也可以先问问感兴趣的地方。无法确认的信息，我会直接说明。'
+// 使用服务端安全类别解释切换，不将限流误写为欠费，也不展示供应商异常原文。
+const fallbackReasons: Record<string, string> = {
+  rate_limit: '请求频率受限', timeout: '响应超时', network: '连接失败',
+  unavailable: '服务暂不可用或繁忙', authentication: '接口认证或权限异常',
+  quota_exceeded: '接口额度不足', configuration: '接口配置不完整',
+  invalid_output: '返回格式未能使用',
+}
 
 /** 每次调用创建独立状态；App只调用一次，不把不同会话放进全局共享变量。 */
 export function useRequirementConversation() {
@@ -58,7 +65,7 @@ export function useRequirementConversation() {
   async function addAttachments(files: File[]): Promise<void> {
     if (!files.length || busy.value || uploading.value || restoreFailed.value || !storageKey) return
     error.value = ''
-    if (pending?.workflow_resume) { error.value = '上次接续尚未确认，请先重试或保留现状。'; return }
+    if (pending?.workflow_resume) { error.value = '上次回复尚未确认，请先重试上次接续。'; return }
     if (files.length + selectedAttachments.value.length > 3) { error.value = '每条消息最多选择3份附件。'; return }
     if (files.some(file => !/\.(png|jpe?g|webp|pdf|docx|txt|md|markdown)$/i.test(file.name))) { error.value = '附件格式仅支持 PNG、JPEG、WebP、PDF、DOCX、TXT 和 Markdown。'; return }
     if (files.some(file => !file.size || file.size > (/\.pdf$/i.test(file.name) ? 30_000_000 : 10 * 1024 * 1024))) {
@@ -90,7 +97,7 @@ export function useRequirementConversation() {
   /** 移除函数：只取消本条选择，保留服务器上的历史原件。 */
   function removeAttachment(id: string): void {
     if (busy.value || uploading.value) return
-    if (pending?.workflow_resume) { error.value = '上次接续尚未确认，请先重试或保留现状。'; return }
+    if (pending?.workflow_resume) { error.value = '上次回复尚未确认，请先重试上次接续。'; return }
     selectedAttachments.value = selectedAttachments.value.filter(item => item.id !== id)
     pending = null
     remember()
@@ -128,6 +135,7 @@ export function useRequirementConversation() {
       ...(turn.response.knowledge?.web_search?.items.map(source => source.id) ?? []),
     ])
     const reply = turn.response.reply.replace(/ ?\[(\d+)\]/g, (match, id: string) => references.has(Number(id)) ? '' : match)
+      .replace(/\n你可以补充条件继续，或选择保留现状。$/, '') // 兼容旧工作流尾句，不改历史快照。
     // 出发地跟随本轮快照，后续修改城市不能改写旧草稿的标题。
     messages.value.push(
       { id: `${turn.message_id}-user`, role: 'user', text: turn.response.result.original_message, attachments: turn.response.attachments ?? [] },
@@ -232,7 +240,7 @@ export function useRequirementConversation() {
     const attachments = [...selectedAttachments.value]
     const attachmentIds = attachments.map(item => item.id)
     if (pending?.workflow_resume && action !== 'cancel' && (pending.message !== text || (pending.selected_provider ?? 'deepseek') !== provider || JSON.stringify(pending.attachment_ids ?? []) !== JSON.stringify(attachmentIds))) {
-      error.value = '上次接续尚未确认，请重试上次接续，或清空输入后选择保留现状。'
+      error.value = '上次回复尚未确认，请先重试上次接续。'
       return
     }
     if (pendingUndo.value) { error.value = '上次撤销尚未确认保存，请先重试撤销。'; return }
@@ -242,6 +250,7 @@ export function useRequirementConversation() {
     input.value = ''
     selectedAttachments.value = []
     const startedAt = Date.now()
+    let timings: Record<string, number> | undefined
     clearStream()
     const token = generation
     error.value = ''
@@ -267,7 +276,8 @@ export function useRequirementConversation() {
         if (update.event === 'progress' && update.data.stage === 'received') received.value = true
         if (update.event === 'draft') draft.value = update.data.text
         else if (update.event === 'reset') draft.value = ''
-        else if (update.event === 'fallback') progress.value.push({ stage: 'model', message: `${modelNames[update.data.from_alias]} 暂不可用，已切换至 ${modelNames[update.data.to_alias]}` })
+        else if (update.event === 'metrics') timings = update.data.stages_seconds
+        else if (update.event === 'fallback') progress.value.push({ stage: 'model', message: `${modelNames[update.data.from_alias]} ${fallbackReasons[update.data.reason_category] ?? '暂不可用'}，已切换至 ${modelNames[update.data.to_alias]}` })
         else progress.value.push(update.data)
         void scrollToLatest()
       })
@@ -275,7 +285,7 @@ export function useRequirementConversation() {
       messages.value = messages.value.filter(item => item.id !== bubbleId)
       showTurn(turn)
       const assistant = messages.value.at(-1)
-      if (assistant) assistant.process = { steps: [...progress.value], draft: draft.value, seconds: Math.max(1, Math.round((Date.now() - startedAt) / 1000)) }
+      if (assistant) assistant.process = { steps: [...progress.value], draft: draft.value, seconds: Math.max(1, Math.round((Date.now() - startedAt) / 1000)), timings }
       pending = null
       remember()
     } catch (cause) {
@@ -325,19 +335,10 @@ export function useRequirementConversation() {
       if (sessionId.value !== id) return
       if (pending && !pending.workflow_resume) { pending = null; remember() }
       selectedProvider.value = provider
-      error.value = pending?.workflow_resume ? '接续已停止，可重试原接续或选择保留现状。' : '生成已停止，可选择模型后重新发送。'
+      error.value = pending?.workflow_resume ? '接续已停止，可重试上次接续。' : '生成已停止，可选择模型后重新发送。'
     } catch (cause) {
       if (token === generation) error.value = cause instanceof Error ? cause.message : '停止未确认，请重试。'
     } finally { stopping.value = false; if (confirmed) sending.value = false }
-  }
-
-  /** 明确选择函数：沿用发送、失败重试与版本保护；不覆盖用户正在写的补充内容。 */
-  async function chooseWorkflow(action: 'accept' | 'cancel'): Promise<void> {
-    if (!workflowTarget.value || busy.value || restoreFailed.value || uploading.value) return
-    if (action === 'accept' && !workflowMessage.value?.workflow?.can_accept) return
-    if (input.value.trim() || selectedAttachments.value.length) { error.value = '请先发送或清空输入中的补充内容。'; return }
-    input.value = action === 'accept' ? '采用当前候选行程' : '保留现状，结束本次规划'
-    await send(action)
   }
 
   /** 原请求重试函数：从内存恢复相同原话、附件编号及选择，避免图恢复使用新编号。 */
@@ -455,6 +456,6 @@ export function useRequirementConversation() {
     error, storageWarning, chatArea, initialize, reloadConversation, send, undoDraft, undoTarget, pendingUndo,
     openEmpty, selectConversation, clearConversation, deleteConversation,
     selectedAttachments, uploading, addAttachments, removeAttachment,
-    workflowTarget, chooseWorkflow, pendingResume, retryWorkflow,
+    workflowTarget, pendingResume, retryWorkflow,
   }
 }

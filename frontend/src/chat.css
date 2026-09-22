@@ -112,9 +112,8 @@
 .messages:has(.itinerary-card) { padding-inline: max(24px,calc((100% - 1000px)/2)); }
 .messages:has(.itinerary-card) .message-row:not(:has(.itinerary-card)) { max-width: 800px; margin-left: auto; margin-right: auto; }
 @media(max-width:700px) { .messages:has(.itinerary-card) { padding-inline: 12px; } }
-.workflow-choice { margin-top: 12px; padding: 14px 16px; border: 1px solid #dce5e0; border-radius: 12px; background: #f7faf8; }
-.workflow-choice p { margin: 8px 0; }
-.workflow-choice button + button { margin-left: 8px; }
+.workflow-preview { margin-top: 12px; }
+.workflow-preview p { margin: 8px 0; }
 
 /* 输入框内保留模型选择与发送；小屏让快捷键提示让出空间。 */
 .model-select { max-width: 155px; padding: 5px 8px; border: 1px solid #dce6dd; border-radius: 8px; background: #f8fbf7; color: #42675c; font: inherit; font-size: 12px; }

@@ -301,6 +301,8 @@ def test_pdf_unclear_name_is_explicit_not_silently_dropped(monkeypatch):
 def test_qwen_labels_each_pdf_image():
     vision = QwenVisionClient.__new__(QwenVisionClient)
     vision.model, vision.timeout = Mock(), 60
+    vision.endpoint = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    vision.model.model_name = "qwen3-vl-plus"
     vision.model.invoke.return_value = AIMessage(
         content=output(), response_metadata={"finish_reason": "stop"},
     )

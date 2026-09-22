@@ -76,5 +76,6 @@ def test_explicit_plan_rag_failure_does_not_invent_prices(store_engine, monkeypa
         model, RequirementHistoryService(store_engine), "test", nullcontext(Mock()), Mock())
     assert saved.response.itinerary is None
     assert saved.response.status == "needs_clarification"
-    assert "知识库" in saved.response.reply and "重试" in saved.response.reply
-    assert len(model.calls) == 1
+    assert saved.response.reply == "这是测试回答。"
+    assert len(model.calls) == 1 and len(model.text_calls) == 1
+    assert "参考方案" in model.text_calls[-1][0]["content"]

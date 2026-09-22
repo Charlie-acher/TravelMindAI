@@ -2,6 +2,7 @@
 需求合并层：把本次修改合并到已有旅行需求。
 """
 
+import re
 from datetime import timedelta
 from typing import Any
 
@@ -82,6 +83,15 @@ def merge_requirements(
         )
     for field in update.clear_fields:
         data[field] = [] if field in LIST_FIELDS else None
+    # 兼容旧轮把舒适偏好误存成硬条件的记录；带数字或无障碍等明确要求不放宽。
+    gentle = [item for item in data["hard_constraints"] if re.fullmatch(
+        r"(?:希望|尽量|想要)?(?:少走路|少走点路|节奏舒适|节奏轻松|轻松一点|慢慢玩)[。！!]?",
+        item.strip())]
+    if gentle:
+        data["hard_constraints"] = [item for item in data["hard_constraints"] if item not in gentle]
+        data["interests"] = list(dict.fromkeys([*data["interests"], *gentle]))
+        if data["pace"] is None:
+            data["pace"] = "relaxed"
     # 首轮也可能已经给出开始日和天数，此时复用同一套“首日计入”的结束日计算。
     # 首轮明确给出两个日期的情况仍由build_result补天数并记录依据；
     # reconcile_dates内部优先检查清空指令，不能把用户刚清掉的日期又补回来。

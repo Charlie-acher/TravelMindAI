@@ -35,9 +35,10 @@ try {
   assert.ok(processHtml.includes('thinking-dot'))
   assert.match(processHtml, /<summary\b[^>]*>[\s\S]*正在查找苏州资料[\s\S]*查看过程[\s\S]*<\/summary>/)
   const finishedHtml = await renderToString(createSSRApp({ render: () => h(ThinkingProcess, {
-    steps: [{ stage: 'search', message: '已检索苏州资料' }], seconds: 3,
+    steps: [{ stage: 'search', message: '已检索苏州资料' }], seconds: 3, timings: { search: 1.25 },
   }) }))
   assert.ok(finishedHtml.includes('用时 3 秒'))
+  assert.ok(finishedHtml.includes('累计 1.3 秒'))
   assert.ok(!finishedHtml.includes(' open'))
   assert.ok(!finishedHtml.includes('回答草稿内容'))
   const { default: AnswerSources } = await server.ssrLoadModule('/src/components/AnswerSources.vue')
@@ -98,11 +99,13 @@ try {
   const { ApiError } = await server.ssrLoadModule('/src/api/http.ts')
   const events = ': heartbeat\r\n\r\nevent: progress\r\ndata: {"stage":"retrieval",\r\ndata: "message":"正在检索杭州资料"}\r\n\r\n'
     + frame('draft', { text: '杭州 🌿 的餐馆' }) + frame('reset', {})
-    + frame('draft', { text: '已重新整理' }) + frame('done', saved)
+    + frame('draft', { text: '已重新整理' })
+    + frame('metrics', { stages_seconds: { retrieval: 1.25 }, first_draft_seconds: 1.5, total_seconds: 3 }) + frame('done', saved)
   for (let size = 1; size <= 31; size++) {
     const updates = []
     assert.deepEqual(await readRequirementStream(chunks(events, size), update => updates.push(update)), saved)
-    assert.deepEqual(updates.map(update => update.event), ['progress', 'draft', 'reset', 'draft'])
+    assert.deepEqual(updates.map(update => update.event), ['progress', 'draft', 'reset', 'draft', 'metrics'])
+    assert.equal(updates[4].data.stages_seconds.retrieval, 1.25)
     assert.equal(updates[0].data.message, '正在检索杭州资料')
     assert.equal(updates[1].data.text, '杭州 🌿 的餐馆')
   }
@@ -278,7 +281,11 @@ try {
   assert.ok(!card.includes('杭州两日慢游'), '以起终点代替宣传标题')
   for (const expected of ['第 1 天', '第 2 天', '09:00', 'api.map.baidu.com/marker', 'coord_type=gcj02', '适合沿湖散步', '城际交通', '非实时', '撤销这次修改']) assert.ok(card.includes(expected), expected)
   assert.ok(!(await renderToString(createSSRApp({ render: () => h(ItineraryCard, { snapshot, undoAvailable: false, busy: false }) }))).includes('撤销这次修改'))
-  for (const expected of ['继续查询', '查询天气', '第 1 天路线', '第 2 天路线', '门票、机票、火车票待查询', 'https://www.12306.cn/index/', 'https://www.airchina.com.cn/zh-CN']) assert.ok(card.includes(expected), expected)
+  for (const expected of ['继续查询', '查询天气', '第 1 天路线', '第 2 天路线', '酒店、机票、火车票的指定日期价格待查询', 'https://www.12306.cn/index/', 'https://www.airchina.com.cn/zh-CN']) assert.ok(card.includes(expected), expected)
+  const pricedSnapshot = structuredClone(snapshot)
+  pricedSnapshot.plan.ticket_prices = [{ place: '雷峰塔', travel_date: null, status: 'published', amount: '40', currency: 'CNY', unit: '成人/人', conditions: '儿童优惠另核对', evidence: '雷峰塔成人门票40元/人', source_url: 'https://www.hangzhou.gov.cn/ticket', source_title: '政府票价公示', checked_at: '2026-09-21T02:00:00Z', published_date: null, date_confirmed: false }]
+  const pricedCard = await renderToString(createSSRApp({ render: () => h(ItineraryCard, { snapshot: pricedSnapshot, undoAvailable: false, busy: false }) }))
+  for (const expected of ['门票公开价格', '雷峰塔成人门票40元/人', 'https://www.hangzhou.gov.cn/ticket', 'https://hrewards.huazhu.com/']) assert.ok(pricedCard.includes(expected), expected)
   for (const dated of [false, true]) {
     for (const blocked of [false, true]) {
       const queries = []

@@ -27,6 +27,7 @@ from app.api.health import router as health_router
 from app.api.requirement.history import router as requirement_history_router
 from app.api.requirement.routes import router as requirements_router
 from app.api.trips import router as sessions_router
+from app.api.usage import router as usage_router
 from app.config import Settings, load_settings
 from app.database import create_database_engine
 from app.llm.gateway import GatewayState
@@ -34,6 +35,8 @@ from app.schemas.common import ErrorResponse
 from app.services.document.jobs import DocumentJobService
 from app.services.knowledge_scope import KNOWLEDGE_SCOPE
 from app.services.trip_service import TripService
+from app.services.usage import usage_scope
+from app.services.usage_store import save_usage
 
 """应用创建函数：加载配置，注册接口和错误处理。"""
 
@@ -106,7 +109,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # 为每个请求生成唯一的请求ID并存储在请求状态中
         request.state.request_id = str(uuid4())
         # 将请求传递给下一个中间件或路由处理程序
-        response = await call_next(request)
+        with usage_scope(request.state.request_id,
+                         lambda call: save_usage(request.app.state.database_engine, call)):
+            response = await call_next(request)
         # 在响应头中添加请求ID，便于追踪和调试
         response.headers["X-Request-ID"] = request.state.request_id
         # 登录与私人历史不得留在浏览器或代理共享缓存中。
@@ -117,6 +122,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     register_error_handlers(app)
     app.include_router(health_router, prefix="/api/v1")
     app.include_router(auth_router, prefix="/api/v1")
+    app.include_router(usage_router, prefix="/api/v1")
 
     # /api/v1 与 router 的 /budget、函数的 /estimate 拼成完整接口路径。
     app.include_router(budget_router, prefix="/api/v1")

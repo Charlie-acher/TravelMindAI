@@ -22,6 +22,7 @@ from langchain_core.tools import BaseTool, ToolException
 from app.config import Settings
 from app.schemas.map_tools import MapToolEvidence
 from app.services.chat.events import progress
+from app.services.usage import usage_call
 
 if TYPE_CHECKING:
     from langchain.mcp import MCPAdapter
@@ -127,7 +128,9 @@ class BaiduMCPClient:
             bundle.calls += 1
             progress("mcp_query", f"正在通过百度地图{READ_TOOLS[tool.name]}")
             try:
-                message = portal.call(invoke, arguments)
+                with usage_call("baidu", tool.name, "mcp.map.baidu.com", "map") as call:
+                    message = portal.call(invoke, arguments)
+                    call["units"] = 1
             except Exception:
                 raise ToolException("百度地图查询失败或超时，请重试或说明暂时无法查询。") from None
             if message.status == "error":

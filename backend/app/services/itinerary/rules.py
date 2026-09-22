@@ -50,7 +50,7 @@ def requested_days(message: str, old: TravelPlan | None,
             for item in found if item not in preserved}
 
 
-"""硬条件检查函数：没有路线和无障碍证据时，不把文字承诺当作核实。"""
+"""待确认条件函数：区分能直接核对的限制与需要在草稿说明的证据缺口。"""
 
 
 def unresolved_constraints(requirements: TravelRequestExtraction) -> list[str]:
@@ -100,9 +100,6 @@ def build_plan(requirements: TravelRequestExtraction, proposals: list[DayProposa
     count, travelers, money = requirements.days, requirements.travelers, requirements.total_budget
     if count is None or travelers is None or money is None or not requirements.destination:
         raise ValueError("请先补齐目的地、天数、人数和总预算")
-    if unresolved_constraints(requirements):
-        raise ValueError("这些硬条件还缺少可核实依据："
-                         + "、".join(unresolved_constraints(requirements)))
     if len({day.day for day in proposals}) != len(proposals):
         raise ValueError("同一天不能重复提交")
     if target_days is not None and {day.day for day in proposals} != target_days:
@@ -170,6 +167,8 @@ def build_plan(requirements: TravelRequestExtraction, proposals: list[DayProposa
         title=f"{requirements.destination}{count}日行程草稿", destination=requirements.destination,
         days=[days[i] for i in range(1, count + 1)], budget=budget,
         warnings=[
+            *[f"未确认：{item}。现有景点介绍和地图位置不足以证明已满足，需另行核实。"
+              for item in unresolved_constraints(requirements)],
             "门票、机票与火车票：待查询；请按实际出行日期核对票价、余票和预约。",
             "天气：待查询；未确定出行日期时不能把当前天气当作旅行期间预报。",
             "这是待确认的行程草稿。活动时间为建议，开放时间、预约和门票需出行前核实。",

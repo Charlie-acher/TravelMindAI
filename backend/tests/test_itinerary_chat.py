@@ -65,7 +65,7 @@ def test_planning_food_preference_modify_undo_and_retry(store_engine):
             expected_revision=2), model, history, "no-reuse", nullcontext(search), maps)
 
 
-"""输出恢复测试函数：规划输出无效时说明失败，不用自由回答冒充草稿。"""
+"""输出恢复测试函数：规划输出无效时仍给参考建议，但不保存未经核对的行程。"""
 
 
 def test_agent_output_failure_saves_reference_reply_without_plan(store_engine):
@@ -91,7 +91,29 @@ def test_agent_output_failure_saves_reference_reply_without_plan(store_engine):
         client, history, "failed-agent", nullcontext(search), Mock(tools=MCPTools()))
     assert search.search.call_count == 1
     assert saved.response.status == "needs_clarification"
-    assert "重试" in saved.response.reply
-    client.generate_text.assert_not_called()
+    assert saved.response.reply == client.generate_text.return_value
+    client.generate_text.assert_called_once()
+    prompt = client.generate_text.call_args.args[0]
+    assert "参考方案" in prompt[0]["content"]
     assert history.read(trip.id).revision == 1
     assert history.read_plan(trip.id) == (0, None)
+
+
+"""资料缺口测试函数：缺城市资料时给文字方案，保留原条件和已有草稿。"""
+
+def test_no_sources_returns_useful_outline_without_publishing(store_engine, monkeypatch):
+    from app.services.chat import service
+    from app.services.itinerary.graph import PlanResult
+
+    trip = TripService(store_engine).create_session("缺资料", user_id=TEST_USER_ID)
+    history = RequirementHistoryService(store_engine)
+    model = RecordingModel([json.dumps(answer(destination="郑州", days=3, travelers=3,
+        total_budget="5000", pace="relaxed"))])
+    model.generate_text = Mock(return_value="先给你一份三天参考方案，地点和交通尚待核实。")
+    monkeypatch.setattr(service, "plan_trip", lambda *a, **kw: PlanResult(None, "未找到郑州资料"))
+    saved = process_saved_message(trip.id, SavedRequirementMessage(message="郑州三天三人5000元",
+        message_id=uuid4(), expected_revision=0), model, history, "no-sources",
+        nullcontext(Mock()), Mock(tools=MCPTools()))
+    assert "参考方案" in saved.response.reply
+    assert saved.response.result.extraction.destination == "郑州"
+    assert saved.response.itinerary is None and history.read_plan(trip.id) == (0, None)

@@ -10,6 +10,7 @@ from pydantic import ValidationError
 
 from app.config import Settings
 from app.schemas.document.answer import WebEvidence, WebSearchResult
+from app.services.usage import usage_call
 
 
 class WebSearchClient:
@@ -25,20 +26,23 @@ class WebSearchClient:
 
     """搜索函数：一次最多五条网页，只保留原文摘要及其位置和时间。"""
 
-    def search(self, query: str) -> WebSearchResult:
-        if self.key is None or not self.key.get_secret_value().strip() or not self.domains:
+    def search(self, query: str, *, domains: list[str] | None = None) -> WebSearchResult:
+        allowed = self.domains if domains is None else domains
+        if self.key is None or not self.key.get_secret_value().strip() or not allowed:
             return WebSearchResult(status="unconfigured")
         try:
-            response = self.http.post(
-                "https://api.tavily.com/search",
-                headers={"Authorization": f"Bearer {self.key.get_secret_value()}"},
-                json={"query": query[:500], "search_depth": "basic", "max_results": 5,
-                      "include_domains": self.domains, "include_answer": False,
-                      "include_raw_content": False, "include_published_date": True},
-                timeout=8,
-            )
-            response.raise_for_status()
-            body = response.json()
+            with usage_call("tavily", "basic-search", "api.tavily.com", "search") as call:
+                response = self.http.post(
+                    "https://api.tavily.com/search",
+                    headers={"Authorization": f"Bearer {self.key.get_secret_value()}"},
+                    json={"query": query[:500], "search_depth": "basic", "max_results": 5,
+                          "include_domains": allowed, "include_answer": False,
+                          "include_raw_content": False, "include_published_date": True},
+                    timeout=8,
+                )
+                response.raise_for_status()
+                body = response.json()
+                call["units"] = 1
             if not isinstance(body, dict) or not isinstance(body.get("results"), list):
                 return WebSearchResult(status="error")
             items: list[WebEvidence] = []
@@ -53,7 +57,7 @@ class WebSearchClient:
                 host = parts.hostname or ""
                 if (parts.scheme not in {"http", "https"} or parts.username or parts.password
                         or not any(host == domain or host.endswith("." + domain)
-                                   for domain in self.domains) or url in seen):
+                                   for domain in allowed) or url in seen):
                     continue
                 try:
                     items.append(WebEvidence(
