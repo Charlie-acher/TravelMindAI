@@ -4,7 +4,7 @@ import { apiFetch, readResponse } from './http'
 export interface AttachmentAnalysis {
   city: string | null; summary: string
   waypoints: { name: string; order: number | null; evidence: string; needs_confirmation: boolean }[]
-  warnings: string[]
+  warnings: string[]; parser_version: string | null
 }
 export interface AttachmentSnapshot {
   id: string; file_name: string; analysis: AttachmentAnalysis | null; error_message: string | null

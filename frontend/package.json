@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:e2e": "tsc -p tsconfig.browser.json && playwright test"
   },
   "dependencies": {
     "@arco-design/web-vue": "2.58.0",
@@ -14,7 +15,9 @@
     "vue": "3.5.42"
   },
   "devDependencies": {
+    "@playwright/test": "1.63.0",
     "@types/markdown-it": "^14.2.0",
+    "@types/node": "22.20.4",
     "@vitejs/plugin-vue": "6.0.8",
     "typescript": "~5.9.3",
     "vite": "8.2.2",

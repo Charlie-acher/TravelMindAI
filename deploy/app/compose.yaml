@@ -1,0 +1,105 @@
+# 本地整套联验：独立项目、端口和卷，不连接原开发数据库或向量目录。
+name: travelmind-app
+x-backend: &backend
+  image: travelmind-api:local
+  build:
+    context: ../..
+    dockerfile: deploy/app/backend.Dockerfile
+  environment:
+    TRAVELMIND_ENVIRONMENT: development
+    TRAVELMIND_DATABASE_URL: postgresql+psycopg://travelmind:${TRAVELMIND_COMPOSE_DB_PASSWORD:?请在backend/.env配置独立Compose数据库密码}@postgres:5432/travelmind
+    TRAVELMIND_MILVUS_URL: http://milvus:19530
+    TRAVELMIND_DOCUMENT_UPLOAD_DIR: /app/temp/uploads
+    TRAVELMIND_MINERU_BASE_URL: http://host.docker.internal:8010
+  volumes:
+    - ../../backend/.env:/run/secrets/travelmind.env:ro
+    - uploads:/app/temp/uploads
+  extra_hosts:
+    - host.docker.internal:host-gateway
+
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: travelmind
+      POSTGRES_DB: travelmind
+      POSTGRES_PASSWORD: ${TRAVELMIND_COMPOSE_DB_PASSWORD:?请配置独立Compose数据库密码}
+    ports:
+      - "127.0.0.1:${TRAVELMIND_COMPOSE_POSTGRES_PORT:-15432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U travelmind -d travelmind"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.23
+    command: ["/usr/local/bin/etcd", "--data-dir=/etcd", "--listen-client-urls=http://0.0.0.0:2379", "--advertise-client-urls=http://etcd:2379", "--auto-compaction-mode=revision", "--auto-compaction-retention=1000"]
+    volumes:
+      - etcd-data:/etcd
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/etcdctl", "--endpoints=http://127.0.0.1:2379", "endpoint", "health"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+  milvus:
+    image: milvusdb/milvus:v2.6.17
+    command: ["milvus", "run", "standalone"]
+    environment:
+      ETCD_USE_EMBED: "false"
+      ETCD_ENDPOINTS: etcd:2379
+      COMMON_STORAGETYPE: local
+      DEPLOY_MODE: STANDALONE
+    volumes:
+      - milvus-data:/var/lib/milvus
+    depends_on:
+      etcd:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 90s
+  migrate:
+    <<: *backend
+    command: ["python", "-m", "alembic", "-x", "env_file=/run/secrets/travelmind.env", "upgrade", "head"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+  api:
+    <<: *backend
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      milvus:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health/ready', timeout=5)"]
+      interval: 10s
+      timeout: 6s
+      retries: 12
+      start_period: 20s
+  web:
+    image: travelmind-web:local
+    build:
+      context: ../..
+      dockerfile: deploy/app/frontend.Dockerfile
+    ports:
+      - "127.0.0.1:${TRAVELMIND_COMPOSE_PORT:-8080}:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/api/v1/health/ready"]
+      interval: 10s
+      timeout: 6s
+      retries: 12
+
+# 只允许显式备份、迁移或删除；阶段清理不可执行down -v。
+volumes:
+  postgres-data:
+  etcd-data:
+  milvus-data:
+  uploads:

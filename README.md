@@ -1,6 +1,6 @@
 # TravelMindAI
 
-TravelMindAI 是旅行需求聊天与共享资料检索应用。首页采用青绿淡彩山景；点击“开始规划”或发送旅行问题时校验登录，登录后继续原问题。对话工作区以左侧历史、中间聊天和右侧状态/文件组织旅行信息；个人空间集中查看自己的附件与行程，管理员管理共享知识库。聊天支持周边商户查询、逐日行程草稿、指定日期修改和撤销。
+TravelMindAI 是旅行需求聊天与共享资料检索应用。首页采用青绿淡彩山景；点击“开始规划”或发送旅行问题时校验登录，登录后继续原问题。对话工作区以左侧历史、中间聊天、右侧文件及悬浮状态面板组织旅行信息；个人空间集中查看自己的附件与行程，管理员管理共享知识库。聊天支持周边商户查询、逐日行程草稿、指定日期修改和撤销。
 
 ## 主要功能与实现
 
@@ -83,6 +83,58 @@ docker compose -f deploy/milvus/compose.yaml ps
 状态面板将各实际型号最近一次聊天调用的输入Token除以该型号容量；它不是累计Token占窗口的比例。容量由`backend/.env`的`TRAVELMIND_MODEL_CONTEXT_WINDOWS`提供，格式为“型号→正整数Token”的JSON对象；空映射或未知型号保持`null`，页面显示暂不可用。新增配置后重启后端。
 
 `backend/.env.example`按2026-09-22资料列出DeepSeek Flash（`deepseek-flash`及`deepseek-v4.1-flash`）1048576、Qwen3.8 Max及两种0902快照别名1000000、`kimi-k2.6`262144（256K）。具体依据见[DeepSeek容量说明](https://api-docs.deepseek.com/quick_start/pricing/)、[DeepSeek精确窗口配置](https://api-docs.deepseek.com/quick_start/agent_integrations/codex/)、[Qwen3.8 Max上下文限制](https://help.aliyun.com/zh/model-studio/qwen3-8-max)、[Kimi开放平台](https://platform.kimi.com/)。更换型号时按供应商当前说明核对；此配置仅用于展示容量，不修改模型调用、输入裁剪或费用规则。
+
+## 浏览器回归
+
+在项目根目录执行：
+
+```powershell
+cd frontend
+npm ci
+npx playwright install chromium
+npm run test:e2e
+```
+
+命令先检查测试类型并构建页面，再启动独立的4175预览端口，执行桌面1440×1000与手机390×844的Chromium用例。覆盖登录、模型选择/刷新恢复、过程摘要与研究助手、攻略文件、状态浮层、窄屏和409版本冲突。端口被占用会报错，不复用未知服务。
+
+浏览器API由固定夹具拦截，未声明的接口会使测试失败，不需要真实账号、模型密钥或后端服务。这一层验证真实页面交互；数据库隔离和真实模型质量仍由后端/现场验收分别检查。失败跟踪文件保存在`temp/runtime/m6-browser-results/`，不提交Git。测试采用[Playwright官方接口拦截](https://playwright.dev/docs/mock)和[测试服务生命周期](https://playwright.dev/docs/test-webserver)。
+
+真实服务模式在本机8000后端启动后执行（先完成上方前端依赖及Chromium安装）：
+
+```powershell
+cd backend
+./.venv/Scripts/python.exe -X utf8 -m scripts.evaluate_browser --live --provider deepseek
+```
+
+命令使用`backend/.env`，核对运行服务身份后创建三个随机专用账号，再启动4176预览。默认运行行程、上传、缺项补问和OCR四组；可用`--scenario journey|uploads|recovery|ocr`单独运行。规划准备并清理本轮独有参考资料；上传覆盖私人TXT/Markdown、管理员共享资料后台处理、聊天来源和删除后检索。OCR用例需要先启动下文的宿主机MinerU。浏览器真实调用模型、知识库/地图与数据库，会产生费用，失败不自动重跑。
+
+成功后只清理本次账号和所属会话，真实调用费用保留。失败可能仍有在途任务，因此保留账号编号供核查，确认任务结束后再按编号清理；不要根据标题或用户名模糊批量删除。未加`--live`只说明步骤，不建账号、不调用模型。真实模式关闭trace，失败截图存于`temp/runtime/m6-live-browser/`。
+
+## 独立 Compose 全栈环境
+
+`deploy/app/compose.yaml`启动Nginx/Vue、单进程FastAPI、迁移任务、PostgreSQL、etcd和Milvus。它使用独立的`travelmind-app`项目和命名卷，不复制或迁移现有开发数据。模型配置仍只读取`backend/.env`；请在该文件设置独立的`TRAVELMIND_COMPOSE_DB_PASSWORD`（随机字母数字，不复用开发库口令），填好文本及Embedding配置。
+
+在项目根目录执行：
+
+```powershell
+docker compose --env-file backend/.env -f deploy/app/compose.yaml config --quiet
+docker compose --env-file backend/.env -f deploy/app/compose.yaml up -d --build --wait --wait-timeout 240
+docker compose --env-file backend/.env -f deploy/app/compose.yaml exec api python -m scripts.manage_accounts --env-file /run/secrets/travelmind.env init-admin
+```
+
+访问[Compose旅行对话](http://localhost:8080/)；初始管理员仍由上面的显式命令创建。8080网页和15432数据库仅绑定本机，API/向量端口不向主机发布。可在`.env`用`TRAVELMIND_COMPOSE_PORT`、`TRAVELMIND_COMPOSE_POSTGRES_PORT`修改端口。不要在同一个浏览器环境同时用`127.0.0.1`登录两套服务：Cookie不区分端口；开发页使用127.0.0.1、Compose使用localhost，或使用独立浏览器配置。
+
+容器不包含`.env`、原文、数据集或开发缓存；运行时只读挂载配置。API以非root账号运行，上传原件保存在`uploads`卷。构建使用[Docker官方在ECR发布的基础镜像](https://www.docker.com/blog/news-from-aws-reinvent-docker-official-images-on-amazon-ecr-public/)，避开本机失效的Docker Hub镜像代理；Python与前端依赖仍按项目锁文件安装。
+
+这是本机HTTP联验配置，尚未配置公网TLS或多worker。PDF/图片OCR仍依赖单独运行的宿主机MinerU（容器地址`host.docker.internal:8010`），不包含在本套镜像中；服务不可达时会明确失败，TXT/Markdown不依赖该服务。数据库和上传卷会跨容器重建保留；停止用`docker compose --env-file backend/.env -f deploy/app/compose.yaml stop`，**不要执行`down -v`清理业务卷**。
+
+从`backend`运行同一组真实浏览器用例，直接经过Nginx，不额外启动Vite预览：
+
+```powershell
+./.venv/Scripts/python.exe -X utf8 -m scripts.evaluate_browser --live --compose --scenario all
+```
+
+入口核对Compose数据库与登录身份，清理会话时通过容器API删除卷内原件，并复用预检Cookie，避免再次消耗登录限额；失败会报告需要核查的专用账号编号。`--scenario failover`仅用于独立Compose故障注入：先给容器配置测试用的不可连接首选模型地址，验证备用模型后立即恢复原API配置；普通`all`不会更改提供方配置。
 
 ## 聊天附件的 MinerU 部署（Windows）
 

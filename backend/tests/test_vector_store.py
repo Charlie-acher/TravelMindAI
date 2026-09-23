@@ -24,6 +24,30 @@ def vector_settings(**changes: object) -> Settings:
     return Settings(**values)
 
 
+"""地址边界测试函数：容器服务名可连接，远程地址和带凭据的地址仍拒绝。"""
+
+@pytest.mark.parametrize("address, allowed", [
+    ("http://milvus:19530", True),
+    ("http://127.0.0.1:19530", True),
+    ("http://example.com:19530", False),
+    ("http://milvus.example.com:19530", False),
+    ("http://user:secret@milvus:19530", False),
+    ("http://milvus:19530?token=secret", False),
+    ("http://milvus:19530#secret", False),
+])
+def test_milvus_address_boundary(address: str, allowed: bool) -> None:
+    from app.services.document.vector_store import MilvusError, MilvusStore
+
+    with httpx.Client(transport=httpx.MockTransport(
+        lambda request: httpx.Response(200, json={"code": 0, "data": {"has": False}}),
+    )) as http:
+        if allowed:
+            assert MilvusStore(vector_settings(milvus_url=address), http).exists() is False
+        else:
+            with pytest.raises(MilvusError):
+                MilvusStore(vector_settings(milvus_url=address), http)
+
+
 """隔离测试函数：模型、地址、维度或版本改变时必须使用不同集合。"""
 
 

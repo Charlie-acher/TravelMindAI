@@ -35,7 +35,7 @@ def test_retry_failure_then_cache_success():
         return item
 
     storage.save_analysis.side_effect = save
-    model.generate_json.side_effect = ["broken", AttachmentAnalysis(
+    model.generate_json.side_effect = ["broken", "broken", AttachmentAnalysis(
         city="杭州", summary="杭州备忘",
     ).model_dump_json()]
     reader = AttachmentReader(storage, model)
@@ -45,7 +45,7 @@ def test_retry_failure_then_cache_success():
     second = reader.read(sid, [item.id])[0]
     assert second.analysis.city == "杭州" and second.error_message is None
     assert reader.read(sid, [item.id])[0] == second
-    assert model.generate_json.call_count == 2
+    assert model.generate_json.call_count == 3
     assert first.analysis is None  # 原失败快照不随后续结果改写。
 
 

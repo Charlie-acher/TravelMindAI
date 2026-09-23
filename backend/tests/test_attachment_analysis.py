@@ -89,6 +89,21 @@ def test_invalid_output_fails(raw):
     model.generate_json.return_value = raw
     with pytest.raises(AttachmentAnalysisError):
         analyze_content("路线.txt", "text/plain", "杭州：先去断桥，再到白堤".encode(), model)
+    assert model.generate_json.call_count == 2
+
+
+"""格式修复测试函数：首次字段不合约时只修复一次，仍逐字核对原文依据。"""
+
+def test_text_schema_failure_repairs_once():
+    model = Mock()
+    model.generate_json.side_effect = ['{"city":"杭州","summary":null}', output()]
+    result = analyze_content("路线.md", "text/markdown", "杭州：先去断桥，再到白堤".encode(), model)
+    assert [point.name for point in result.waypoints] == ["断桥", "白堤"]
+    assert model.generate_json.call_count == 2
+    retry = model.generate_json.call_args.args[0]
+    assert retry[-2] == {"role": "assistant", "content": '{"city":"杭州","summary":null}'}
+    assert "summary" in retry[-1]["content"]
+    assert "input" not in retry[-1]["content"]
 
 
 """顺序降级测试函数：多条路线重复编号时保留有依据地点，不猜测全局次序。"""

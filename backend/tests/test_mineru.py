@@ -92,6 +92,22 @@ def test_parsed_extraction_checks_page_evidence():
         analyze_parsed(parsed, model)
 
 
+"""正文批次修复测试函数：MinerU原文不重读，模型字段错误仅补一次。"""
+
+def test_parsed_schema_failure_repairs_once():
+    from app.schemas.document.base import ParsedDocument, ParsedSection
+    from app.services.attachment.analysis import analyze_parsed
+
+    parsed = ParsedDocument(sections=[ParsedSection(text="苏州博物馆", page_number=1, order=1)])
+    model = Mock()
+    model.generate_json.side_effect = ['{"summary":null}', json.dumps({
+        "summary": "苏州博物馆", "waypoints": [
+            {"name": "苏州博物馆", "evidence": "【第1页】苏州博物馆"}],
+    }, ensure_ascii=False)]
+    assert analyze_parsed(parsed, model).waypoints[0].name == "苏州博物馆"
+    assert model.generate_json.call_count == 2
+
+
 """长正文测试函数：最后一页也必须交给模型，不能只处理第一批。"""
 
 def test_long_parsed_document_reads_last_page():
@@ -170,13 +186,13 @@ def test_reader_reuses_parsed_cache_on_retry():
 
     storage.save_analysis.side_effect = save
     model.generate_json.side_effect = [
-        "broken", AttachmentAnalysis(summary="杭州断桥").model_dump_json()]
+        "broken", "broken", AttachmentAnalysis(summary="杭州断桥").model_dump_json()]
     reader = AttachmentReader(storage, model, mineru=mineru)
     assert reader.read(sid, [item.id])[0].analysis is None
     assert reader.read(sid, [item.id])[0].analysis.parser_version == PARSER_VERSION
     reader.read(sid, [item.id])
     assert mineru.parse.call_count == 1
-    assert model.generate_json.call_count == 2
+    assert model.generate_json.call_count == 3
     storage.save_parsed.assert_called_once()
 
 

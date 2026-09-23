@@ -255,6 +255,12 @@ def process_saved_message(
                if planning else "knowledge", changed_fields=changed,
         conversation=understanding.conversation, history_summary=candidate_summary,
     )
+    use = understanding.attachment_use
+    if (not snapshots and not planning and understanding.response_mode != "plan"
+            and use and use.mode in {"read", "reference"} and not use.apply_to_plan):
+        # 公共资料问答不能因模型误填只读附件用途而被拦住；附件规划缺件仍走原有补问保护。
+        understanding.attachment_use = None
+        understanding.retrieval_query = understanding.retrieval_query or payload.message[:800]
     if payload.attachment_ids or understanding.attachment_use is not None:
         # 接续使用本会话上一轮不可变快照，提交事务仍会逐一复核原件归属。
         progress("attachment", "正在处理附件用途与行程")

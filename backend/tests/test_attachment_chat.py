@@ -204,6 +204,54 @@ def test_missing_referenced_attachment_never_falls_back_to_planning():
     assert response.status == "needs_clarification"
 
 
+"""共享问答测试函数：没有私人附件时，模型误填只读用途不能挡住知识库检索。"""
+
+@pytest.mark.parametrize("mode", ["read", "reference"])
+@pytest.mark.parametrize("intent", ["travel_info", "other"])
+def test_shared_question_without_attachments_ignores_read_use(mode, intent):
+    store, model, search = Mock(), Mock(), Mock()
+    history = RequirementHistory(session_id=uuid4(), revision=0, turns=[])
+    store.read.return_value, store.read_plan.return_value = history, (0, None)
+    message = "苏州青苔旅行读书会的集合口令和签到地点是什么？请根据资料回答。"
+    model.generate_json.return_value = json.dumps({
+        "requirement_update": answer(intent=intent), "conversation": {},
+        "attachment_use": {"mode": mode, "apply_to_plan": False},
+    })
+    with patch("app.services.chat.service.ground_chat_response",
+               side_effect=lambda response, *args, **kwargs: response) as ground:
+        process_saved_message(history.session_id, SavedRequirementMessage(message=message,
+            message_id=uuid4(), expected_revision=0), model, store, "shared-question",
+            nullcontext(search), Mock())
+    ground.assert_called_once()
+    assert message in ground.call_args.kwargs["retrieval_query"]
+    response = store.append.call_args.args[3]
+    assert response.attachment_use is None
+    assert response.status == "knowledge"
+    assert response.attachments == []
+
+
+"""矛盾用途测试函数：规划标记与附件只读标记冲突时，缺少原件仍不得直接修改草稿。"""
+
+def test_missing_attachment_with_conflicting_plan_flags_preserves_draft():
+    prior = _turn(1, "聊点别的", "好的")
+    prior.response.result.extraction = requirements()
+    store, model = Mock(), Mock()
+    store.read.return_value = RequirementHistory(session_id=uuid4(), revision=1, turns=[prior])
+    store.read_plan.return_value = (1, Mock())
+    raw = json.loads(interpretation(AttachmentUse(mode="reference", apply_to_plan=False)))
+    raw["response_mode"] = "plan"
+    model.generate_json.return_value = json.dumps(raw)
+    payload = SavedRequirementMessage(message="请根据刚才附件重新生成行程", message_id=uuid4(),
+                                      expected_revision=1)
+    with patch("app.services.chat.service.plan_trip") as ordinary:
+        process_saved_message(store.read.return_value.session_id, payload, model, store, "qa",
+                              nullcontext(Mock()), Mock())
+    ordinary.assert_not_called()
+    response = store.append.call_args.args[3]
+    assert response.result.extraction == requirements()
+    assert response.status == "needs_clarification"
+
+
 """恢复测试函数：补问理解失败后附件与用途仍能由下一轮接续，不退成普通问答。"""
 
 def test_invalid_followup_keeps_pending_attachment_and_requirements():

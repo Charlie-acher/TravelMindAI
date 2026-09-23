@@ -28,11 +28,11 @@ class MilvusStore:
         if settings.milvus_url is None:
             raise MilvusError("未启用Milvus，请配置TRAVELMIND_MILVUS_URL并重启后端")
         address = settings.milvus_url
-        # 本步仅支持本地免认证容器，不能把无认证配置直接用于远程服务器。
-        if address.host not in {"localhost", "127.0.0.1", "[::1]"} or (
+        # 仅支持本机和Compose内部milvus服务，免认证端口不对外发布。
+        if address.host not in {"localhost", "127.0.0.1", "[::1]", "milvus"} or (
             address.username or address.password or address.query or address.fragment
         ):
-            raise MilvusError("本步Milvus仅支持本机地址，且地址不能包含凭据或查询参数")
+            raise MilvusError("Milvus仅支持本机或内部milvus服务，地址不能包含凭据或查询参数")
         identity = [
             settings.embedding_provider,
             str(settings.embedding_base_url or ""),
